@@ -1,10 +1,16 @@
 # tPSGI
 
+Yet another abstraction layer atop the already towering and excellent one that is `starman`.
+
+```
+tpsgi --router Trog::Routes::HTML --conf conf/config.ini --logger Log::Dispatch::Mine --auth Trog::Auth ... [starman args]
+```
+
 A PSGI server built to migrate old mod\_perl/apache stacks onto psgi, and that powers tCMS.
 
 Will execute any executable file (chmod +x) in www/ as CGI, and otherwise host any static file therein.
 
-All modules in lib/Routes/\*.pm (the Routes:: namespace) will be required, and combined to form a routing table so you have an analogue to rewrite rules.
+All passed routing modules will be required, and combined to form a routing table so you have an analogue to rewrite rules.
 
 Routing Modules look like so:
 ```
@@ -22,7 +28,7 @@ our %routes = (
 );
 ```
 
-The Authentication handler must be lib/Auth/Handler.pm, and look like so:
+The (optional) Authentication handler can be passed, and look like so:
 
 ```
 package Auth::Handler;
@@ -61,3 +67,16 @@ sub user_for_session {
     return $user;
 }
 ```
+
+In the event that auth or route handlers are found, these events will be noted in the startup log.
+
+## Logging
+
+By default we have two log handlers...which you can augment with your own, based on Log::Dispatch.
+
+The first default is to print ERROR and worse to the STDOUT of the PSGI server.
+The other is to emit INFO or better to logs/tpsgi.log
+
+Set the env var DEBUG=1 to have both emit all message levels.
+
+Pass your own dispatch subclasses and watch it go whir.
