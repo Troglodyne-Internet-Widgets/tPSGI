@@ -56,7 +56,7 @@ my %extra_types = (
 );
 
 my $ct      = 'Content-type';
-my $LOGNAME = -d '/var/log' ? '/var/log/www/perlfs.log' : '~/.perlfs/perlfs.log';
+my $LOGNAME = -d 'log' ? 'log/www/perlfs.log' : '~/.perlfs/perlfs.log';
 $LOGNAME = $ENV{CUSTOM_LOG} if $ENV{CUSTOM_LOG};
 
 my $LEVEL = $ENV{WWW_VERBOSE} ? 'debug' : 'info';

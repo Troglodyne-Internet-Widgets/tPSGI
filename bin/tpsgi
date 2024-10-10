@@ -1,0 +1,84 @@
+#!/usr/bin/env starman
+
+#pacakge bin::tpsgi;
+
+#ABSTRACT: PSGI application which simplifies migrating legacy/cgi applications to PSGI
+
+use strict;
+use warnings;
+
+use FindBin::libs;
+
+use TPSGI;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Config::Simple;
+
+my %options = main(@ARGV);
+
+=head1 USAGE
+
+tpsgi ... starman options
+
+tpsgi obeys a config file, ~/.tpsgi.ini which is in Config::Simple (key=value) format, with the keys being:
+
+    verbose     # Whether to print all log messages or not
+    custom_log  # Custom location for default (rotated) log
+    routers     # Router module(s), separate with comma
+    indices     # Dirindex files.  In addition to index.html, index.htm, index.cgi
+    loggers     # Logger module(s), separate with comma
+    auth        # Authentication module
+
+The idea is that this application is going to be run in a chroot with the user's homedir being the application dir.
+
+=cut
+
+sub main {
+    my (@args) = @_;
+
+    my %options = _get_from_config();
+    return %options;
+}
+
+sub _get_from_config {
+    my %options = (
+        verbose    => 0,
+        custom_log => undef,
+        routers    => [],
+        loggers    => [],
+        auth       => undef,
+    );
+   	my $config_file = "$ENV{HOME}/.tpsgi.ini";
+	if (-f $config_file) {
+		my $conf = Config::Simple->new($config_file);
+		my %config;
+		%config = %{$conf->param(-block => 'default')} if $conf;
+
+		# Merge the configuration with the options
+		foreach my $opt (keys(%options)) {
+			if ( ref $options{$opt} eq 'ARRAY' ) {
+				next unless exists $config{$opt};
+				my @arrayed = ref $config{$opt} eq 'ARRAY' ? @{$config{$opt}} : ($config{$opt});
+				push(@{$options{$opt}}, @arrayed);
+				next;
+			}
+			$options{$opt} = $config{$opt} if exists $config{$opt};
+		}
+	}
+    return %options;
+}
+
+our $app = sub {
+    $options{verbose} = 1;
+    my $self = TPSGI->new(%options);
+    return eval { $self->app(@_) } || do {
+		my $env = shift;
+        $env->{'psgi.errors'}->print($@);
+
+		# Redact the stack trace past line 1, it usually has things which should not be shown
+		$self->{cur_query}->{message} = $@;
+		$self->{cur_query}->{message} =~ s/\n.*//g if $self->{cur_query}->{message};
+
+		return $self->error($self->{cur_query});
+    };
+};
