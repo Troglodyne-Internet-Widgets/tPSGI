@@ -122,7 +122,7 @@ sub _log {
     #XXX Log lines must start as an ISO8601 date, anything else breaks fail2ban's beautiful mind
     my $tstamp = POSIX::strftime "%Y-%m-%dT%H:%M:%SZ", gmtime;
 
-    return "$tstamp : $self->{ip} $msg\n";
+    return "[Worker $$] $tstamp : $self->{ip} $msg\n";
 }
 
 # Logger short cuts
