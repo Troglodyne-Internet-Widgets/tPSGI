@@ -1,0 +1,24 @@
+#!/bin/bash
+USERNAME=$(bin/tpsgi-hostname --user)
+echo "tCMS running as user $USERNAME"
+[[ -e run/tcms.pid ]] && sudo pkill -F run/tcms.pid
+source perl5/perlbrew/etc/bashrc
+PERL=$(sudo -u $USERNAME perlbrew exec which perl)
+STARMAN=$(sudo -u $USERNAME perlbrew exec which starman)
+sudo $PERL $STARMAN www/server.psgi --listen run/tcms.sock --workers 20 --user "$USERNAME" --daemonize --pid run/tcms.pid --chroot $(pwd)
+
+# Wait until the socket file is ready
+until [ -e run/tcms.sock ]
+do
+    echo "Waiting for sock to be ready..."
+    sleep 1
+done
+
+# Fix ownership of socket so nginx can see it
+sudo chown $USERNAME:www-data run/tcms.sock
+sudo chmod 0770 run/tcms.sock
+
+echo "tCMS running as PID "`cat run/tcms.pid`
+
+# TODO Run reloader process
+#$PERL bin/tcms_monitor

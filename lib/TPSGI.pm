@@ -35,6 +35,8 @@ use Log::Dispatch;
 use Log::Dispatch::Screen;
 use Log::Dispatch::FileRotate;
 
+use Config::Simple;
+
 #1MB chunks
 our $CHUNK_SEP  = 'perlfsSep666YOLO42069';
 our $CHUNK_SIZE = 1024000;
@@ -747,5 +749,33 @@ sub static {
     return $self->forbidden($self->{current_query});
 }
 
+sub get_config {
+    my %options = (
+        verbose    => 0,
+        custom_log => undef,
+        routers    => [],
+        loggers    => [],
+        auth       => undef,
+        domain     => '',
+    );
+   	my $config_file = "$ENV{HOME}/.tpsgi.ini";
+	if (-f $config_file) {
+		my $conf = Config::Simple->new($config_file);
+		my %config;
+		%config = %{$conf->param(-block => 'default')} if $conf;
+
+		# Merge the configuration with the options
+		foreach my $opt (keys(%options)) {
+			if ( ref $options{$opt} eq 'ARRAY' ) {
+				next unless exists $config{$opt};
+				my @arrayed = ref $config{$opt} eq 'ARRAY' ? @{$config{$opt}} : ($config{$opt});
+				push(@{$options{$opt}}, @arrayed);
+				next;
+			}
+			$options{$opt} = $config{$opt} if exists $config{$opt};
+		}
+	}
+    return %options;
+}
 
 1;

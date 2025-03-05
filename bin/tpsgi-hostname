@@ -1,0 +1,24 @@
+#!/usr/bin/env perl
+
+package TPSGI::Hostname;
+
+use strict;
+use warnings;
+
+use FindBin::libs;
+
+use TPSGI;
+
+sub main {
+    my @args = @_;
+
+    my %config = TPSGI::get_config();
+
+    die "Could not get hostname" unless $config{domain};
+    print "$config{domain}\n";
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;
