@@ -490,14 +490,14 @@ sub app {
     return $self->route( $route_actual, $env, $fullpath, $path, $start, $last_fetch, $deflate ) if $route_actual;
 
     # Do a case insensitive match, because osx and windows
-    my $file_possible = lc("www$path");
+    my $file_possible = $self->mangle_filename("www/$path");
     my $file_actual = $file_possible if -f $file_possible;
 
     # Dirindices
     if (-d $file_possible) {
-        foreach my $index ($self->indices) {
+        foreach my $index (@{$self->indices}) {
             next if $file_actual;
-            my $dirindex = lc("www$path/$index");
+            my $dirindex = $self->mangle_filename("www$path/$index");
             $dirindex =~ s|//|/|g;
             $file_actual = $dirindex if -f $dirindex;
         }
@@ -510,6 +510,14 @@ sub app {
     my @ranges = parse_ranges($env);
     return $self->serve( $fullpath, $file_actual, $start, $streaming, \@ranges, $last_fetch, $deflate ) if $file_actual;
     return $self->notfound($self->{cur_query});
+}
+
+sub mangle_filename {
+    my ($self,$path) = @_;
+    # XXX yes, you can have case sensitive OSX, but basically nobody enables that ever
+    $path = lc($path) if List::Util::any { $^O eq $_ } qw{darwin MSWin32 dos};
+    $self->DEBUG("Path mangled to $path");
+    return $path;
 }
 
 sub parse_ranges {
