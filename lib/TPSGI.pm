@@ -205,9 +205,6 @@ sub new {
     $options{indices} //=[];
     $options{indices} = [@{$options{indices}},qw{index.html index.htm index.cgi}];
 
-    my $num_routes = keys(%routes);
-    INFO("Parsed $num_routes routes from config in $ENV{HOME}/.tpsgi");
-
     $options{routes} = \%routes;
     $options{ip} = '0.0.0.0';
     return bless(\%options, $class);
