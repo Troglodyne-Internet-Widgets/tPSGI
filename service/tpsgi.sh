@@ -5,18 +5,17 @@ echo "Set HOME to $HOME"
 
 cd $HOME
 echo "Changed directory to $HOME"
+# Make sure this is referring to the right perl env
+source .bashrc
 
 USERNAME=$(bin/tpsgi-config --user)
 [[ -z $USERNAME ]] && USERNAME=$USER
 echo "tPSGI running as user $USERNAME"
 
 [[ -e run/tpsgi.pid ]] && sudo pkill -F run/tpsgi.pid
-source perl5/perlbrew/etc/bashrc
 
 # We should obey the PATH set by this user, whose homedir is right here, ideally. 
-PERL=$(sudo -i -u $USERNAME which perl)
-STARMAN=$(sudo -i -u $USERNAME which starman)
-sudo $PERL $STARMAN www/server.psgi --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --daemonize --pid run/tpsgi.pid --chroot $(pwd)
+bin/tpsgi --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --daemonize --pid run/tpsgi.pid --chroot $(pwd)
 
 # Wait until the socket file is ready
 until [ -e run/tpsgi.sock ]

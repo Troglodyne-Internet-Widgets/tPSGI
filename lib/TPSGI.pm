@@ -205,6 +205,9 @@ sub new {
     $options{indices} //=[];
     $options{indices} = [@{$options{indices}},qw{index.html index.htm index.cgi}];
 
+    my $num_routes = keys(%routes);
+    INFO("Parsed $num_routes routes from config in $ENV{HOME}/.tpsgi");
+
     $options{routes} = \%routes;
     $options{ip} = '0.0.0.0';
     return bless(\%options, $class);
@@ -765,6 +768,7 @@ sub get_config {
         loggers    => [],
         auth       => undef,
         domain     => '',
+        user       => '',
     );
    	my $config_file = "$ENV{HOME}/.tpsgi.ini";
 	if (-f $config_file) {
