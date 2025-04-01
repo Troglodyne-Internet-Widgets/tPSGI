@@ -1,3 +1,7 @@
 log/*
 www/*
 .tpsgi.ini
+perl5/
+.bashrc
+.bash_profile
+service/tpsgi.service*

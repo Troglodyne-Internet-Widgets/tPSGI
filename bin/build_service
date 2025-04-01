@@ -1,0 +1,9 @@
+#!/bin/sh
+
+DOMAIN=$1
+REPLACEME=$(dirname $0)/..
+REPLACEME=$(readlink -f $REPLACEME)
+
+sed -e "s|__REPLACEME__|$REPLACEME|g" $REPLACEME/service/tpsgi.tmpl > $REPLACEME/service/tpsgi.service.intermediate
+sed -e "s|__DOMAIN__|$DOMAIN|g" $REPLACEME/service/tpsgi.service.intermediate > $REPLACEME/service/tpsgi.service
+rm $REPLACEME/service/tpsgi.service.intermediate

@@ -19,6 +19,14 @@ The best way to do that is to expect raw PSGI to be output.
 
 Obeys ~/.tpsgi.ini -- this is what will control all the custom aspects mentioned below:
 
+    domain:    what domain name this site is
+    user:      what user will this run under
+    http_user: user of the HTTP server (usually www_data)
+    routers:   Where routing modules live
+    indices:   What files are acceptable to execute as directory indexes
+
+You can run bin/tpsgi-config to get any config value needed by scripts.
+
 ## Custom routing
 
 All passed routing modules will be required, and combined to form a routing table so you have an analogue to rewrite rules.
@@ -112,3 +120,21 @@ The first default is to print ERROR and worse to the STDOUT of the PSGI server.
 The other is to emit INFO or better to logs/tpsgi.log
 
 Pass your own dispatch subclasses and watch it go whir.
+
+## Service configuration
+
+Proper operation of this as a production service requires some things:
+
+0. You have a user which has this reposity as their home directory.
+1. You run the shell script, tpsgi.sh in service/ to run this as a service.
+2. You set the username and the domain name of the service in .tpsgi.ini
+3. You set your PATH appropriately to pick up on things like custom perls in a .bashrc
+4. You set the group of your reverse proxy application in .tpsgi.ini (the http\_user variable)
+
+run service/tpsgi.sh as root and you should be set supposing the above is true.
+
+In general the operation is like so:
+
+1. nginx (or whatever) looks for a sock file owned $USER:$WEB\_GROUP, and reverse proxies to this
+2. tpsgi is actively listening on this sock file.
+

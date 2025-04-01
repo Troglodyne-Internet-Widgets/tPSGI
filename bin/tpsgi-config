@@ -1,0 +1,38 @@
+#!/usr/bin/env perl
+
+package TPSGI::ConfigTool;
+
+use strict;
+use warnings;
+
+use FindBin::libs;
+use Getopt::Long qw{GetOptionsFromArray};
+
+use TPSGI;
+
+sub main {
+    my @args = @_;
+
+    my %config = TPSGI::get_config();
+
+    my @params = keys(%config);
+    my (%def, %options);
+    @def{@params} = map { \$options{$_} } @params;
+
+    GetOptionsFromArray(\@args, %def);
+
+    foreach my $param (keys(%options)) {
+        next unless $options{$param};
+        my @to_print;
+        @to_print = ref $config{$param} eq 'ARRAY' ? @{$config{$param}}: $config{$param};
+        foreach my $line (@to_print) {
+            print "$line\n";
+        }
+        return 0;
+    }
+    die "Must pass at least one option";
+}
+
+exit main(@ARGV) unless caller;
+
+1;

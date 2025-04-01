@@ -1,0 +1,16 @@
+[Unit]
+Description=tPSGI for __DOMAIN__
+Wants=multi-user.target
+After=multi-user.target
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+Type=forking
+PIDFile=__REPLACEME__/run/tpsgi.pid
+ExecStart=__REPLACEME__/service/tpsgi.sh
+WorkingDirectory=__REPLACEME__/
+Restart=always
+OOMPolicy=stop
+ExecReload=kill -HUP $MAINPID
