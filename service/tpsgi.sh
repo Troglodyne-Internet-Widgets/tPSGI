@@ -1,10 +1,5 @@
 #!/bin/bash
-HOMEDIR=$(git rev-parse --show-toplevel)
-[[ ! -z $HOMEDIR ]] && HOME=$HOMEDIR
-echo "Set HOME to $HOME"
 
-cd $HOME
-echo "Changed directory to $HOME"
 # Make sure this is referring to the right perl env
 source .bashrc
 

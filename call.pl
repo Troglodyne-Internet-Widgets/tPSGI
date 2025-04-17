@@ -13,11 +13,14 @@ $ENV{HOME}=$FindBin::Bin;
 #Grab our custom routes
 use TPSGI;
 
+my $host = $ENV{DOMAIN} // 'localhost';
+
 my %env = (
     REQUEST_METHOD => $ARGV[0],
     PATH_INFO      => $ARGV[1],
     QUERY_STRING   => $ARGV[2],
-    REQUEST_URI    => 'http://localhost/'.$ARGV[1],
+    REQUEST_URI    => "http://$host/".$ARGV[1],
+    HTTP_HOST      => $host
 );
 
 our $app = sub {

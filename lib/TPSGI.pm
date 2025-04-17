@@ -7,6 +7,7 @@ use warnings;
 
 use feature qw{state};
 
+use Cwd();
 use Carp::Always;
 
 use POSIX();
@@ -474,7 +475,7 @@ sub app {
     my $deflate = grep { 'gzip' eq $_ } @accept_encodings;
 
     # Set the IP of the request so we can fail2ban
-    $self->{ip} = $env->{HTTP_X_FORWARDED_FOR} || $env->{REMOTE_ADDR};
+    $self->{ip} = $env->{HTTP_X_FORWARDED_FOR} || $env->{REMOTE_ADDR} || $self->{ip};
 
     my $streaming = $env->{'psgi.streaming'};
 
@@ -767,6 +768,7 @@ sub get_config {
         domain     => '',
         user       => '',
     );
+    $ENV{HOME} ||= Cwd::getcwd();
    	my $config_file = "$ENV{HOME}/.tpsgi.ini";
 	if (-f $config_file) {
 		my $conf = Config::Simple->new($config_file);
