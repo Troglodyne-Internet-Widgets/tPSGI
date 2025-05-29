@@ -188,12 +188,13 @@ sub new {
         # The router needs to exist and have nonzero numbers of routes.
         my ($package) = basename($route) =~ m/(\S+)\.pm$/;
         my $r = "$package\:\:routes";
+        local $@;
         my $success = eval { require $route; 1; };
         if ($success) {
             my $pkg_routes = *$r{HASH};
             @routes{keys(%$pkg_routes)} = values(%$pkg_routes);
         } else {
-            die "Could not load $route!";
+            die "Could not load $route!\n$@\n";
         }
     }
     use strict 'refs';
