@@ -14,7 +14,7 @@ use POSIX();
 use Mojo::File;
 use Plack::MIME;
 use IO::Compress::Gzip;
-use Time::HiRes qw{tv_interval};
+use Time::HiRes qw{usleep gettimeofday tv_interval};
 
 # For CGI features
 use HTTP::Parser::XS qw{HEADERS_AS_HASHREF};
@@ -26,7 +26,6 @@ use File::Find;
 use Sys::Hostname();
 use Plack::MIME  ();
 use DateTime::Format::HTTP();
-use Time::HiRes      qw{gettimeofday tv_interval};
 
 use File::Touch;
 use File::Path;
@@ -559,7 +558,7 @@ sub route {
     my $content_type = $env->{CONTENT_TYPE};
     # It is the responsibility of each route to respond to HEAD requests correctly
     return $self->badrequest($self->{cur_query}) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } ('HEAD', $route->{method});
-    
+
     my $callback;
     if (exists $route->{callbacks}{'*'}) {
         $callback = $route->{callbacks}{'*'};
@@ -584,6 +583,7 @@ sub route {
     my @ranges = parse_ranges($env);
     $query->{ranges}       = \@ranges;
     $query->{start}        = $start;
+    # Put things to tv_interval in here for Server-Timing
     $query->{fullpath}     = $fullpath;
     $query->{method}       = $route->{method};
 
@@ -668,25 +668,71 @@ sub cgi {
 }
 
 sub stream_raw_http {
-    my ($self, $output, $last_fetch, $callback) = @_;
+    my ($self, $data, $output, $last_fetch, $to_fork, $callback) = @_;
 
-    open(my $out, '<', \$output) or die "I couldn't open a string as a filehandle, which can only happen if you don't compile perl with PerlIO";
-    my ($code, %headers) = extract_headers($out, $last_fetch, 1);
+    open(my $out, '+<', undef) or die "I couldn't open anon filehandle, which can only happen if you don't compile perl with PerlIO";
+    $out->autoflush(1);
+    print $out $output;
+    my $pid = _fork($to_fork, $out);
+
+    # If we can't emit headers within ~250ms something's wrong
+    my $timeout = 250 * 1000;
+
+    my ($code,%headers);
+
+    for (0..$timeout) {
+        seek($out, 0,0);
+        ($code, %headers) = extract_headers($out, $last_fetch, 1);
+        usleep 1 unless %headers;
+        last if %headers;
+    }
+    die "Failed to emit headers within timeout" unless %headers;
+
+    # Append server-timing headers
+    $self->checkpoint($data, 'emitHeader');
+    $headers{'Server-Timing'} = $self->build_server_timing($data);
+
     $code //= 500;
 
     $self->INFO("$self->{cur_query}{method} $code $self->{cur_query}{fullpath}");
+
+    # If the page doesn't load within 30 seconds, don't load it
+    $timeout = 3000000;
     return sub {
         my $responder = shift;
 
         my $writer = $responder->( [ $code, [%headers] ] );
-        while ( $out->read( my $buf, $CHUNK_SIZE ) ) {
+        my $SEEK_SET = $out->tell();
+        for (0..$timeout) {
+            $out->seek($SEEK_SET, 0);
+            $out->read( my $buf, $CHUNK_SIZE );
             $writer->write($buf);
+            #If we read anything, advance the pointer
+            $SEEK_SET = $out->tell() if $buf;
+            last if waitpid($pid, 1) > 0;
+            usleep 1000;
         }
         $writer->close;
         close($out);
+        waitpid($pid, 0);
+        $self->INFO("Response written in ".(tv_interval($data->{start}))." s");
         # Wait on the script to do whatever it's doing after closing stdout
         $callback->() if ref $callback eq 'CODE';
     };
+}
+
+sub _fork {
+    my ($callback, $fh) = @_;
+    select $fh;
+    $|=1;
+    my $pid = fork();
+    die "Could not fork child" unless defined $pid;
+    if ($pid == 0) {
+        $callback->();
+        exit 0;
+    }
+    select STDOUT;
+    return $pid;
 }
 
 =head2 extract_headers($fh, $last_fetch)
@@ -770,24 +816,47 @@ sub get_config {
         user       => '',
     );
     $ENV{HOME} ||= Cwd::getcwd();
-   	my $config_file = "$ENV{HOME}/.tpsgi.ini";
-	if (-f $config_file) {
-		my $conf = Config::Simple->new($config_file);
-		my %config;
-		%config = %{$conf->param(-block => 'default')} if $conf;
+    my $config_file = "$ENV{HOME}/.tpsgi.ini";
+    if (-f $config_file) {
+        my $conf = Config::Simple->new($config_file);
+        my %config;
+        %config = %{$conf->param(-block => 'default')} if $conf;
 
-		# Merge the configuration with the options
-		foreach my $opt (keys(%options)) {
-			if ( ref $options{$opt} eq 'ARRAY' ) {
-				next unless exists $config{$opt};
-				my @arrayed = ref $config{$opt} eq 'ARRAY' ? @{$config{$opt}} : ($config{$opt});
-				push(@{$options{$opt}}, @arrayed);
-				next;
-			}
-			$options{$opt} = $config{$opt} if exists $config{$opt};
-		}
-	}
+        # Merge the configuration with the options
+        foreach my $opt (keys(%options)) {
+            if ( ref $options{$opt} eq 'ARRAY' ) {
+                next unless exists $config{$opt};
+                my @arrayed = ref $config{$opt} eq 'ARRAY' ? @{$config{$opt}} : ($config{$opt});
+                push(@{$options{$opt}}, @arrayed);
+                next;
+            }
+            $options{$opt} = $config{$opt} if exists $config{$opt};
+        }
+    }
     return %options;
+}
+
+# Convenience method to keep track of server-timing
+sub checkpoint {
+    my ($self, $data, $name) = @_;
+    $data->{checkpoints} //= [[ start => $data->{start} ]];
+    push(@{$data->{checkpoints}}, [ $name => [gettimeofday] ]);
+}
+
+sub build_server_timing {
+    my ($self, $data) = @_;
+    my @st;
+    my $last_interval;
+    foreach my $checkpoint (@{$data->{checkpoints}}) {
+        if ($last_interval) {
+            my $dur = tv_interval($last_interval, $checkpoint->[1]) * 1000;
+            push(@st, "$checkpoint->[0];dur=$dur");
+        }
+        $last_interval = $checkpoint->[1];
+    }
+    my $tot = tv_interval($data->{start}) * 1000;
+    push(@st, "tot;dur=$tot");
+    return join(', ', @st);
 }
 
 1;
