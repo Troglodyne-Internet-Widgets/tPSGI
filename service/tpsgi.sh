@@ -12,6 +12,9 @@ echo "tPSGI running as user $USERNAME"
 # Bind the various dirs we need for chroot to work
 readarray -t BIND_DIRS <<< $(bin/tpsgi-config --binds)
 for bind in "${BIND_DIRS[@]}"; do
+    if [[ -z $bind ]]; then
+        continue;
+    fi;
     bn=$(basename $bind)
     to_bind=$(pwd)/$bn;
     if [[ -d $bind ]]; then
