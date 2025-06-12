@@ -10,6 +10,7 @@ use feature qw{state};
 use Cwd();
 use Carp::Always;
 
+use UUID();
 use POSIX();
 use Mojo::File;
 use Plack::MIME;
@@ -72,9 +73,16 @@ my $ct      = 'Content-type';
 my $rq;
 my $cur_query = {};
 
+sub request_id {
+    my ($self, $regenerate) = @_;
+    return $self->{uuid} if $self->{uuid} && !$regenerate;
+    $self->{uuid} = UUID::uuid();
+    return $self->{uuid};
+}
+
 sub log {
     my $self = shift;
-    
+
     state $log;
     return $log if $log;
 
@@ -123,8 +131,9 @@ sub _log {
 
     #XXX Log lines must start as an ISO8601 date, anything else breaks fail2ban's beautiful mind
     my $tstamp = POSIX::strftime "%Y-%m-%dT%H:%M:%SZ", gmtime;
+    my $uuid = $self->request_id();
 
-    return "[Worker $$] $tstamp : $self->{ip} $msg\n";
+    return "[Worker $$] {Request $uuid} $tstamp : $self->{ip} $msg\n";
 }
 
 # Logger short cuts
@@ -431,6 +440,9 @@ sub app {
 
     my $env = shift;
 
+    # Setup the unique ID for the request
+    $env->{REQUEST_ID} = $self->request_id(1);
+
     # Discard the path used in the log, it's too long and enough 4xx error code = ban
     return $self->toolong({ method => $env->{REQUEST_METHOD}, fullpath => '...' }) if length( $env->{REQUEST_URI} ) > 2048;
 
@@ -476,6 +488,9 @@ sub app {
 
     # Set the IP of the request so we can fail2ban
     $self->{ip} = $env->{HTTP_X_FORWARDED_FOR} || $env->{REMOTE_ADDR} || $self->{ip};
+
+    # Make sure this works further down the line
+    $env->{REMOTE_ADDR} = $env->{HTTP_X_FORWARDED_FOR} if $env->{HTTP_X_FORWARDED_FOR};
 
     my $streaming = $env->{'psgi.streaming'};
 
