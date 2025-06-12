@@ -829,6 +829,7 @@ sub get_config {
         auth       => undef,
         domain     => '',
         user       => '',
+        binds      => [],
     );
     $ENV{HOME} ||= Cwd::getcwd();
     my $config_file = "$ENV{HOME}/.tpsgi.ini";
