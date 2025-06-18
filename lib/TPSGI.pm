@@ -497,9 +497,9 @@ sub app {
     # If we have an actual route, just use it.
     my $r = $self->routes;
     my $route_actual = $r->{$path};
-    # Might be a regexed route.
+    # Might be a regexed route. Sort reversed so we try the longest routes first.
     if (!$route_actual) {
-        my $matched = List::Util::first { exists $r->{$_}{pattern} && $path =~ m/^$r->{$_}{pattern}$/ } keys(%$r);
+        my $matched = List::Util::first { exists $r->{$_}{pattern} && $path =~ m/^$r->{$_}{pattern}$/ } sort { $b cmp $a } keys(%$r);
         $route_actual = $r->{$matched} if $matched;
     }
 
