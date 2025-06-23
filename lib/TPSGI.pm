@@ -39,10 +39,11 @@ use Log::Dispatch::FileRotate;
 use Config::Simple;
 
 # Building in observability, whee
+my $DO_PROFILE;
 BEGIN {
     # If we have manually set the NYTPROF var, use it and don't try to control
     # When to stop or start it.
-    my $DO_PROFILE = $ENV{NYTPROF} ? 0 : 1;
+    $DO_PROFILE = $ENV{NYTPROF} ? 0 : 1;
     $ENV{NYTPROF} ||= "sigexit=int:savesrc=0:start=no";
     require Devel::NYTProf;
 }
