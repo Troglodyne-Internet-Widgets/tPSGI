@@ -38,6 +38,15 @@ use Log::Dispatch::FileRotate;
 
 use Config::Simple;
 
+# Building in observability, whee
+BEGIN {
+    # If we have manually set the NYTPROF var, use it and don't try to control
+    # When to stop or start it.
+    $DO_PROFILE = $ENV{NYTPROF} ? 0 : 1;
+    $ENV{NYTPROF} ||= "sigexit=int:savesrc=0:start=no";
+    require Devel::NYTProf;
+}
+
 #1MB chunks
 our $CHUNK_SEP  = 'perlfsSep666YOLO42069';
 our $CHUNK_SIZE = 1024000;
@@ -607,6 +616,10 @@ sub route {
 
     # Setup the CGI vars they expect IF requested
     local %ENV = (%ENV, CGI::Emulate::PSGI->emulate_environment($env)) if $route->{env};
+
+    # Realistically, performance only matters for routes.
+    # So, let's enabling profiling from this point onwards when running in debug mode.
+    DB::enable_profile() if $self->{verbose} && $DO_PROFILE;
 
     {
         my $output = $callback->($self, $query);
