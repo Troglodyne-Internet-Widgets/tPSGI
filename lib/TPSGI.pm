@@ -741,6 +741,7 @@ sub stream_raw_http {
                 while ($out->read( my $buf, $CHUNK_SIZE )) {
                     $writer->write($buf) if $buf;
                 }
+                last;
             }
             usleep 1000;
         }
