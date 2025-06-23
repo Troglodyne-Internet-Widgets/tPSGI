@@ -42,7 +42,7 @@ use Config::Simple;
 BEGIN {
     # If we have manually set the NYTPROF var, use it and don't try to control
     # When to stop or start it.
-    $DO_PROFILE = $ENV{NYTPROF} ? 0 : 1;
+    my $DO_PROFILE = $ENV{NYTPROF} ? 0 : 1;
     $ENV{NYTPROF} ||= "sigexit=int:savesrc=0:start=no";
     require Devel::NYTProf;
 }
@@ -704,17 +704,17 @@ sub stream_raw_http {
     my $pid = _fork($to_fork, $out);
 
     # If we can't emit headers within ~250ms something's wrong
-    my $timeout = 250 * 1000;
+    my $timeout = 250;
 
     my ($code,%headers);
 
-    for (0..$timeout) {
+    do {
         seek($out, 0,0);
         ($code, %headers) = extract_headers($out, $last_fetch, 1);
-        usleep 1 unless %headers;
-        last if %headers;
-    }
-    die "Failed to emit headers within timeout" unless %headers;
+        usleep 1000 unless %headers;
+    } while !%headers;
+
+    die "Failed to emit headers within 250ms" unless %headers;
 
     # Append server-timing headers
     $self->checkpoint($data, 'emitHeader');
@@ -725,7 +725,7 @@ sub stream_raw_http {
     $self->INFO("$self->{cur_query}{method} $code $self->{cur_query}{fullpath}");
 
     # If the page doesn't load within 30 seconds, don't load it
-    $timeout = 3000000;
+    $timeout = 30_000;
     return sub {
         my $responder = shift;
 
@@ -733,11 +733,14 @@ sub stream_raw_http {
         my $SEEK_SET = $out->tell();
         for (0..$timeout) {
             $out->seek($SEEK_SET, 0);
-            $out->read( my $buf, $CHUNK_SIZE );
-            $writer->write($buf);
-            #If we read anything, advance the pointer
-            $SEEK_SET = $out->tell() if $buf;
-            last if waitpid($pid, 1) > 0;
+            $SEEK_SET += $out->read( my $buf, $CHUNK_SIZE );
+            $writer->write($buf) if $buf;
+            # All done, drain the fh
+            if ( waitpid($pid, 1) > 0 ) {
+                while ($out->read( my $buf, $CHUNK_SIZE )) {
+                    $writer->write($buf) if $buf;
+                }
+            }
             usleep 1000;
         }
         $writer->close;
