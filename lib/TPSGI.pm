@@ -38,14 +38,14 @@ use Log::Dispatch::FileRotate;
 
 use Config::Simple;
 
-# Building in observability, whee
-my $DO_PROFILE;
+# Generally we want the users to be able to DB::enable_profile() and DB::disable_profile() as they choose.
 BEGIN {
     # If we have manually set the NYTPROF var, use it and don't try to control
     # When to stop or start it.
-    $DO_PROFILE = $ENV{NYTPROF} ? 0 : 1;
-    $ENV{NYTPROF} ||= "sigexit=int:savesrc=0:start=no";
+    my $basedir = Cwd::abs_path("$FindBin::Bin");
+    $ENV{NYTPROF} ||= "sigexit=1:savesrc=0:start=no:file=$basedir/prof/nytprof.out";
     require Devel::NYTProf;
+    mkdir "$basedir/prof";
 }
 
 #1MB chunks
@@ -199,7 +199,7 @@ Options are:
 sub new {
     my ($class, %options) = @_;
 
-    my %routes;
+    my @routes;
 
     no strict 'refs';
     foreach my $route (@{$options{routers}}) {
@@ -209,8 +209,8 @@ sub new {
         local $@;
         my $success = eval { require $route; 1; };
         if ($success) {
-            my $pkg_routes = *$r{HASH};
-            @routes{keys(%$pkg_routes)} = values(%$pkg_routes);
+            my $pkg_routes = *$r{ARRAY};
+            push(@routes,@$pkg_routes);
         } else {
             die "Could not load $route!\n$@\n";
         }
@@ -218,14 +218,14 @@ sub new {
     use strict 'refs';
 
     # Set the pattern used to discover the route if needed later.
-    foreach my $route (keys(%routes)) {
-        $routes{$route}{pattern} = $route;
+    for (my $i=0; $i < scalar(@routes); $i += 2 ) {
+        $routes[$i+1]{pattern} = $routes[$i];
     }
 
     $options{indices} //=[];
     $options{indices} = [@{$options{indices}},qw{index.html index.htm index.cgi}];
 
-    $options{routes} = \%routes;
+    $options{routes} = \@routes;
     $options{ip} = '0.0.0.0';
     return bless(\%options, $class);
 }
@@ -447,8 +447,10 @@ sub app {
     my $self = shift;
     # Start the server timing clock
     my $start = [gettimeofday];
+    $self->{cur_query} = {};
 
     my $env = shift;
+    $self->{filehandle} = $env->{'psgix.io'} // *STDOUT;
 
     # Setup the unique ID for the request
     $env->{REQUEST_ID} = $self->request_id(1);
@@ -506,11 +508,13 @@ sub app {
 
     # If we have an actual route, just use it.
     my $r = $self->routes;
-    my $route_actual = $r->{$path};
+    my $route_index = List::Util::first { ($r->[$_] // '') eq $path } 0..scalar(@$r);
+    my $route_actual;
+    $route_actual = $r->[$route_index+1] if $route_index;
     # Might be a regexed route. Sort reversed so we try the longest routes first.
     if (!$route_actual) {
-        my $matched = List::Util::first { exists $r->{$_}{pattern} && $path =~ m/^$r->{$_}{pattern}$/ } sort { $b cmp $a } keys(%$r);
-        $route_actual = $r->{$matched} if $matched;
+        my $matched = List::Util::first { $path =~ m/^$r->[$_]$/ } 0..scalar(@$r);
+        $route_actual = $r->[$matched+1] if $matched;
     }
 
     return $self->route( $route_actual, $env, $fullpath, $path, $start, $last_fetch, $deflate ) if $route_actual;
@@ -618,10 +622,6 @@ sub route {
     # Setup the CGI vars they expect IF requested
     local %ENV = (%ENV, CGI::Emulate::PSGI->emulate_environment($env)) if $route->{env};
 
-    # Realistically, performance only matters for routes.
-    # So, let's enabling profiling from this point onwards when running in debug mode.
-    DB::enable_profile() if $self->{verbose} && $DO_PROFILE;
-
     {
         my $output = $callback->($self, $query);
 
@@ -680,7 +680,7 @@ sub cgi {
     local %ENV = (%ENV, CGI::Emulate::PSGI->emulate_environment($env));
 
     my $pid = open(my $out, '-|', "$file_actual");
-    my ($code, %headers) = extract_headers($out, $last_fetch);
+    my ($code, $offset, %headers) = extract_headers($out, $last_fetch);
     $code //= 500;
     return sub {
         my $responder = shift;
@@ -696,62 +696,54 @@ sub cgi {
     };
 }
 
-sub stream_raw_http {
+sub stream_raw_and_i_mean_it {
     my ($self, $data, $output, $last_fetch, $to_fork, $callback) = @_;
-
-    open(my $out, '+<', undef) or die "I couldn't open anon filehandle, which can only happen if you don't compile perl with PerlIO";
-    $out->autoflush(1);
-    print $out $output;
-    my $pid = _fork($to_fork, $out);
-
-    # If we can't emit headers within ~250ms something's wrong
-    my $timeout = 250;
-
-    my ($code,%headers);
-
-    do {
-        seek($out, 0,0);
-        ($code, %headers) = extract_headers($out, $last_fetch, 1);
-        usleep 1000 unless %headers;
-    } while !%headers;
-
-    die "Failed to emit headers within 250ms" unless %headers;
-
-    # Append server-timing headers
-    $self->checkpoint($data, 'emitHeader');
-    $headers{'Server-Timing'} = $self->build_server_timing($data);
-
-    $code //= 500;
-
-    $self->INFO("$self->{cur_query}{method} $code $self->{cur_query}{fullpath}");
-
-    # If the page doesn't load within 30 seconds, don't load it
-    $timeout = 30_000;
     return sub {
         my $responder = shift;
 
-        my $writer = $responder->( [ $code, [%headers] ] );
-        my $SEEK_SET = $out->tell();
-        for (0..$timeout) {
-            $out->seek($SEEK_SET, 0);
-            $SEEK_SET += $out->read( my $buf, $CHUNK_SIZE );
-            $writer->write($buf) if $buf;
-            # All done, drain the fh
-            if ( waitpid($pid, 1) > 0 ) {
-                while ($out->read( my $buf, $CHUNK_SIZE )) {
-                    $writer->write($buf) if $buf;
-                }
-                last;
-            }
-            usleep 1000;
-        }
-        $writer->close;
-        close($out);
-        waitpid($pid, 0);
-        $self->INFO("Response written in ".(tv_interval($data->{start}))." s");
-        # Wait on the script to do whatever it's doing after closing stdout
-        $callback->() if ref $callback eq 'CODE';
     };
+}
+
+sub stream_raw_http {
+    my ($self, $data, $last_fetch, $to_fork, $callback, $error_handler) = @_;
+
+    my $time_to_here = tv_interval($data->{start});
+    $self->DEBUG("Routing took $time_to_here s");
+    my $post_routing = [gettimeofday];
+
+    my $fh = $self->{filehandle};
+
+    # The CGIs you are executing here SHOULD NOT emit a status line.
+    # Most apache CGIs you find don't anyways, so this is usually not a big deal.
+    print $fh "HTTP/1.1 200 OK\n";
+    # Emit our server-timing header.
+    print $fh "Server-Timing: ".$self->build_server_timing($data)."\n"; #app;dur=".($time_to_here*1000)."\n";
+
+    # We *must* fork because we can't rely on the child to close stdout.
+    my $pid = _fork(sub {
+        $self->DEBUG("Forking child took".(tv_interval($post_routing))." s");
+        local $@;
+        eval { $to_fork->() };
+        $self->ERROR("Raw HTTTP streaming encountered exception: $@") if $@;
+        if (ref $error_handler eq 'CODE') {
+            local $@;
+            eval { $error_handler->() };
+            $self->ERROR("HTTP streaming error handler encountered exception: $@") if $@;
+        }
+    }, $fh);
+
+    waitpid($pid, 0);
+    close($fh);
+
+    $self->DEBUG("Response written in ".(tv_interval($post_routing))." s");
+    if (ref $callback eq 'CODE') {
+        my $post_start = [gettimeofday];
+        local $@;
+        eval { $callback->() };
+        $self->ERROR("Post-close callback encountered exception: $@") if $@;
+        $self->DEBUG("Post-close callback took ".(tv_interval($post_start))." s");
+    }
+    exit 0;
 }
 
 sub _fork {
@@ -785,6 +777,8 @@ sub extract_headers {
         last if $_ eq "\n";
         $headers .= $_;
     }
+    #XXX still a toctou
+    my $offset = $fh->tell();
     my ( undef, undef, $status, undef, $headers_parsed ) = HTTP::Parser::XS::parse_http_response( "$headers\n", HEADERS_AS_HASHREF );
 
     my $code = $status // 200;
@@ -797,7 +791,7 @@ sub extract_headers {
         $headers_parsed->{"Last-Modified"} = $now_string;
     }
 
-    return ($code, %$headers_parsed);
+    return ($code, $offset, %$headers_parsed);
 }
 
 sub static {
@@ -807,8 +801,8 @@ sub static {
 
     # XXX because of psgi I can't just vomit the file directly
     if ( open( my $fh, '<', "statics/$path" ) ) {
-        my ($code, $headers_parsed) = (200, {});
-        ($code, %$headers_parsed) = extract_headers($fh, $last_fetch );
+        my ($code, $offset, $headers_parsed) = (200, undef, {});
+        ($code, $offset, %$headers_parsed) = extract_headers($fh, $last_fetch );
 
         # Append server-timing headers
         my $tot = tv_interval($start) * 1000;
@@ -890,6 +884,9 @@ sub build_server_timing {
     }
     my $tot = tv_interval($data->{start}) * 1000;
     push(@st, "tot;dur=$tot");
+
+    delete $data->{checkpoints};
+
     return join(', ', @st);
 }
 
