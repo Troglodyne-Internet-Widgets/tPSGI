@@ -21,7 +21,7 @@ sub main {
 
     GetOptionsFromArray(\@args, %def);
 
-    foreach my $param (keys(%options)) {
+    foreach my $param (keys(%def)) {
         next unless $options{$param};
         my @to_print;
         @to_print = ref $config{$param} eq 'ARRAY' ? @{$config{$param}}: $config{$param};
