@@ -199,14 +199,19 @@ Options are:
 sub new {
     my ($class, %options) = @_;
 
+    my $self = bless(\%options, $class);
+    $self->{ip} = '0.0.0.0';
+
     my @routes;
 
+    # XXX TODO make these routes able to be fully qualified namespaces (::)!
     no strict 'refs';
-    foreach my $route (@{$options{routers}}) {
+    foreach my $route (@{$self->{routers}}) {
         # The router needs to exist and have nonzero numbers of routes.
         my ($package) = basename($route) =~ m/(\S+)\.pm$/;
         my $r = "$package\:\:routes";
         local $@;
+        $self->INFO("require $route");
         my $success = eval { require $route; 1; };
         if ($success) {
             my $pkg_routes = *$r{ARRAY};
@@ -222,12 +227,11 @@ sub new {
         $routes[$i+1]{pattern} = $routes[$i];
     }
 
-    $options{indices} //=[];
-    $options{indices} = [@{$options{indices}},qw{index.html index.htm index.cgi}];
+    $self->{indices} //=[];
+    $self->{indices} = [@{$self->{indices}},qw{index.html index.htm index.cgi}];
 
-    $options{routes} = \@routes;
-    $options{ip} = '0.0.0.0';
-    return bless(\%options, $class);
+    $self->{routes} = \@routes;
+    return $self;
 }
 
 sub indices {
@@ -510,11 +514,17 @@ sub app {
     my $r = $self->routes;
     my $route_index = List::Util::first { ($r->[$_] // '') eq $path } 0..scalar(@$r);
     my $route_actual;
-    $route_actual = $r->[$route_index+1] if $route_index;
+    $route_actual = $r->[$route_index+1] if defined($route_index);
+
     # Might be a regexed route. Sort reversed so we try the longest routes first.
     if (!$route_actual) {
-        my $matched = List::Util::first { $path =~ m/^$r->[$_]$/ } 0..scalar(@$r);
-        $route_actual = $r->[$matched+1] if $matched;
+        my $matched = List::Util::first {
+
+            # Here's where you want to use Regexp::Debugger in the context of call.pl to debug routes... EX:
+            # perl ./call.pl GET /path/to/route
+            $path =~ m/^$r->[$_]$/;
+        } 0..scalar(@$r);
+        $route_actual = $r->[$matched+1] if defined($matched);
     }
 
     return $self->route( $route_actual, $env, $fullpath, $path, $start, $last_fetch, $deflate ) if $route_actual;
@@ -584,7 +594,7 @@ sub appears_executable {
 sub route {
     my ($self, $route, $env, $fullpath, $path, $start, $last_fetch, $deflate ) = @_;
 
-    my $content_type = $env->{CONTENT_TYPE};
+    my $content_type = $env->{CONTENT_TYPE} || 'text/html'; # If not set, that's the assumption.
     # It is the responsibility of each route to respond to HEAD requests correctly
     return $self->badrequest($self->{cur_query}) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } ('HEAD', $route->{method});
 

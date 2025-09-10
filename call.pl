@@ -1,16 +1,12 @@
 #!/usr/bin/env perl
-# Use to call specific routes
+# Use to call specific routes with the same configuration your website has
 
 use strict;
 use warnings;
 
 use Data::Dumper;
 use FindBin::libs;
-use FindBin;
 use Carp::Always;
-
-chdir $FindBin::Bin;
-$ENV{HOME}=$FindBin::Bin;
 
 #Grab our custom routes
 use TPSGI;
@@ -32,8 +28,12 @@ sub emit_error {
 }
 
 our $app = sub {
-    my $self = TPSGI->new(TPSGI::get_config());
+    my %cfg = TPSGI::get_config();
+    my $self = TPSGI->new(%cfg);
     local $@;
+
+    chdir($cfg{'basedir'}) || warn "Can't chdir to $cfg{'basedir'}: $_";
+
     return eval { $self->app(@_) } || do {
         my $env = shift;
         emit_error($env, $@);
