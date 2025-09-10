@@ -833,6 +833,7 @@ sub static {
 }
 
 sub get_config {
+    $ENV{HOME} ||= Cwd::getcwd();
     my %options = (
         verbose    => 0,
         custom_log => undef,
@@ -842,8 +843,8 @@ sub get_config {
         domain     => '',
         user       => '',
         binds      => [],
+        basedir    => $ENV{'HOME'},
     );
-    $ENV{HOME} ||= Cwd::getcwd();
     my $config_file = "$ENV{HOME}/.tpsgi.ini";
     if (-f $config_file) {
         my $conf = Config::Simple->new($config_file);

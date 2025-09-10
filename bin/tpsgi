@@ -26,6 +26,7 @@ tpsgi obeys a config file, ~/.tpsgi.ini which is in Config::Simple (key=value) f
     loggers     # Logger module(s), separate with comma
     auth        # Authentication module
     domain      # Domain name of the application, used by things like service files
+    basedir     # Directory you want to base this out of (defaults to HOME).
 
 The idea is that this application is going to be run in a chroot with the user's homedir being the application dir.
 
@@ -35,11 +36,16 @@ sub main {
     my (@args) = @_;
 
     my %options = TPSGI::get_config();
+
     return %options;
 }
 
 our $app = sub {
     $options{verbose} = 1;
+
+    # Change your dir into whatever basedir you need to be in
+    chdir($options{'basedir'}) or warn "Can't chdir into $options{'basedir'}: $!";
+
     my $self = TPSGI->new(%options);
     return eval { $self->app(@_) } || do {
 		my $env = shift;
