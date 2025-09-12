@@ -33,7 +33,7 @@ All passed routing modules will be required, and combined to form a routing tabl
 
 Routing Modules look like so:
 ```
-our %routes = (
+our @routes = (
     '/foo/(\w+)/save' => {
         method    => 'GET',
         callbacks => { # Run these subroutines to execute the appropriate handler given the content-type.  Expects normal PSGI output.
@@ -51,6 +51,7 @@ our %routes = (
     ...
 );
 ```
+Note that this is an array, as we want this to preserve order. Fat commas are used to hint that this is in fact a tuple.
 
 Router callbacks are passed the TPSGI object and the raw query, which means you can do:
 
