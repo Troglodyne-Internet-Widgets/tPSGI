@@ -7,6 +7,8 @@ use warnings;
 
 use feature qw{state};
 
+use FindBin;
+
 use Cwd();
 use Carp::Always;
 
