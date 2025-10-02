@@ -30,6 +30,12 @@ done
 # We should obey the PATH set by this user, whose homedir is right here, ideally.
 bin/tpsgi --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --daemonize --pid run/tpsgi.pid --chroot $(pwd)
 
+if [ $? ]
+then
+    echo "Could not start service!"
+    exit 1;
+fi
+
 # Wait until the socket file is ready
 until [ -e run/tpsgi.sock ]
 do
