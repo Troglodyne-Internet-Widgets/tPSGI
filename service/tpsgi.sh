@@ -27,7 +27,7 @@ done
 # We should obey the PATH set by this user, whose homedir is right here, ideally.
 bin/tpsgi --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --daemonize --pid run/tpsgi.pid --chroot $(pwd)
 
-if [ $? ]
+if [ $? -ne 0 ]
 then
     echo "Could not start service!"
     exit 1;
