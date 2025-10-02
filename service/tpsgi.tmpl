@@ -9,6 +9,7 @@ WantedBy=multi-user.target
 [Service]
 Type=forking
 PIDFile=__REPLACEME__/run/tpsgi.pid
+Environment=PATH='__PERL5BIN__'
 ExecStart=__REPLACEME__/service/tpsgi.sh
 WorkingDirectory=__REPLACEME__/
 Restart=always
