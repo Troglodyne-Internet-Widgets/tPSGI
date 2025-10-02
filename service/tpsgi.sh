@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Make sure this is referring to the right perl env
-source .bashrc
-
 USERNAME=$(bin/tpsgi-config --user)
 [[ -z $USERNAME ]] && USERNAME=$USER
 echo "tPSGI running as user $USERNAME"

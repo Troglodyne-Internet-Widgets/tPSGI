@@ -37,6 +37,7 @@ WriteMakefile(
         "Sys::Hostname" => "0",
         "TPSGI" => "0",
         "UUID" => "0",
+        "Devel::NYTProf" => "0",
         "Starman" => "0",
     },
     test => {TESTS => 't/*.t'}
