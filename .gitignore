@@ -5,3 +5,5 @@ perl5/
 .bashrc
 .bash_profile
 service/tpsgi.service*
+Makefile
+MYMETA*
