@@ -194,7 +194,7 @@ Options are:
     verbose
     routers
     loggers
-    authn
+    auth
 
 =cut
 
