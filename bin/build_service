@@ -9,3 +9,5 @@ PERL5BIN=$(perl -V:scriptdir | sed -e "s/^scriptdir=//g;s/[';]//g")":$PATH"
 sed -e "s|__REPLACEME__|$REPLACEME|g;s|__PERL5BIN__|$PERL5BIN|g" $REPLACEME/service/tpsgi.tmpl > $REPLACEME/service/tpsgi.service.intermediate
 sed -e "s|__DOMAIN__|$DOMAIN|g" $REPLACEME/service/tpsgi.service.intermediate > $REPLACEME/service/tpsgi.service
 rm $REPLACEME/service/tpsgi.service.intermediate
+
+echo "Wrote $REPLACEME/service/tpsgi.service"
