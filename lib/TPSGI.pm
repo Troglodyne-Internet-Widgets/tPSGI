@@ -498,8 +498,8 @@ sub _app {
 
 	# set the referer & ua to go into DB logs, but not logs in general.
     # The referer/ua largely has no importance beyond being a proto bug report for log messages.
-    $referer = $env->{HTTP_REFERER};
-    $ua      = $env->{HTTP_UA};
+    my $referer = $env->{HTTP_REFERER};
+    my $ua      = $env->{HTTP_UA};
 
     $cur_query = {
 		route    => $path,
