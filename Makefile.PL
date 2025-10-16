@@ -35,7 +35,6 @@ WriteMakefile(
         "Plack::MIME" => "0",
         "POSIX" => "0",
         "Sys::Hostname" => "0",
-        "TPSGI" => "0",
         "UUID" => "0",
         "Devel::NYTProf" => "0",
         "Starman" => "0",
