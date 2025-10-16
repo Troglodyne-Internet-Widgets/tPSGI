@@ -30,6 +30,7 @@ use Sys::Hostname();
 use Plack::MIME  ();
 use DateTime::Format::HTTP();
 
+use URL::Encode();
 use File::Touch;
 use File::Path;
 use Cwd qw{abs_path};
@@ -83,7 +84,6 @@ my %extra_types = (
 my $ct      = 'Content-type';
 #memoize
 my $rq;
-my $cur_query = {};
 
 sub request_id {
     my ($self, $regenerate) = @_;
@@ -447,13 +447,31 @@ sub unavailable {
     return _generic( $body, 503 );
 }
 
-my %etags;
-my $domain;
+my $cur_query = {};
+my $debug = $ENV{TPSGI_DEBUG};
 sub app {
+    return eval { _app(@_) } || do {
+        my $env = shift;
+        $env->{'psgi.errors'}->print($@);
+
+        # Redact the stack trace past line 1, it usually has things which should not be shown
+        $cur_query->{message} = $@;
+        $cur_query->{message} =~ s/\n.*//g if $cur_query->{message} && !$debug;
+
+        return _error($cur_query);
+    };
+}
+
+my %etags;
+sub _app {
     my $self = shift;
+
     # Start the server timing clock
     my $start = [gettimeofday];
-    $self->{cur_query} = {};
+    $cur_query = {};
+
+	# Don't make things group read/write
+	umask 0007;
 
     my $env = shift;
     $self->{filehandle} = $env->{'psgix.io'} // *STDOUT;
@@ -465,7 +483,7 @@ sub app {
     return $self->toolong({ method => $env->{REQUEST_METHOD}, fullpath => '...' }) if length( $env->{REQUEST_URI} ) > 2048;
 
     # Various stuff important for logging requests
-    $domain //= eval { Sys::Hostname::hostname() } // $env->{HTTP_X_FORWARDED_HOST} || $env->{HTTP_HOST};
+    my $domain = $env->{HTTP_X_FORWARDED_HOST} || $env->{HTTP_HOST} // eval { Sys::Hostname::hostname() };
     my $path = $env->{PATH_INFO};
     my $port   = $env->{HTTP_X_FORWARDED_PORT} // $env->{HTTP_PORT};
     my $pport  = defined $port ? ":$port" : "";
@@ -475,11 +493,26 @@ sub app {
     # It's important that we log what the user ACTUALLY requested rather than the rewritten path later on.
     my $fullpath = "$scheme://$domain$pport$path";
 
-    # sigdie can now "do the right thing"
-    $self->{cur_query} = { route => $path, fullpath => $path, method => $method };
+	# So we can log it for fail2ban
+	my $ip = $env->{HTTP_X_FORWARDED_FOR} || $env->{REMOTE_ADDR};
+
+	# set the referer & ua to go into DB logs, but not logs in general.
+    # The referer/ua largely has no importance beyond being a proto bug report for log messages.
+    $referer = $env->{HTTP_REFERER};
+    $ua      = $env->{HTTP_UA};
+
+    $cur_query = {
+		route    => $path,
+		fullpath => $path,
+		method   => $method,
+		ip       => $ip,
+		ua       => $ua,
+		referer  => $referer,
+	};
 
     # Check eTags.  If we don't know about it, just assume it's good and lazily fill the cache
     # XXX yes, this allows cache poisoning...but only for logged in users!
+	# This also needs to be IN DB so that we coordinate properly across forks
     if ( $env->{HTTP_IF_NONE_MATCH} ) {
         $self->INFO("$env->{REQUEST_METHOD} 304 $fullpath");
         return [ 304, [], [''] ] if $env->{HTTP_IF_NONE_MATCH} eq ( $etags{ $env->{REQUEST_URI} } || '' );
@@ -551,7 +584,7 @@ sub app {
     $self->INFO("Attempting to serve $fullpath [".($file_possible // "")."]");
     my @ranges = parse_ranges($env);
     return $self->serve( $fullpath, $file_actual, $start, $streaming, \@ranges, $last_fetch, $deflate ) if $file_actual;
-    return $self->notfound($self->{cur_query});
+    return $self->notfound($cur_query);
 }
 
 sub mangle_filename {
@@ -598,13 +631,13 @@ sub route {
 
     my $content_type = $env->{CONTENT_TYPE} || 'text/html'; # If not set, that's the assumption.
     # It is the responsibility of each route to respond to HEAD requests correctly
-    return $self->badrequest($self->{cur_query}) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } ('HEAD', $route->{method});
+    return $self->badrequest($cur_query) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } ('HEAD', $route->{method});
 
     my $callback;
     if (exists $route->{callbacks}{'*'}) {
         $callback = $route->{callbacks}{'*'};
     } else {
-        return $self->badrequest($self->{cur_query}) unless exists $route->{callbacks}{$content_type};
+        return $self->badrequest($cur_query) unless exists $route->{callbacks}{$content_type};
         $callback = $route->{callbacks}{$content_type};
     }
 
@@ -629,7 +662,7 @@ sub route {
     $query->{method}       = $route->{method};
 
     # This allows for better error handlers if we die in the route.
-    $self->{cur_query} = $query;
+    $cur_query = $query;
 
     # Setup the CGI vars they expect IF requested
     local %ENV = (%ENV, CGI::Emulate::PSGI->emulate_environment($env)) if $route->{env};

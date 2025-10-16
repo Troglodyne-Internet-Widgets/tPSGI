@@ -38,6 +38,7 @@ WriteMakefile(
         "UUID" => "0",
         "Devel::NYTProf" => "0",
         "Starman" => "0",
+        "URL::Encode" => "0",
     },
     test => {TESTS => 't/*.t'}
 );
