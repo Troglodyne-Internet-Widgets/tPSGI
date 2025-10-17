@@ -27,6 +27,7 @@ tpsgi obeys a config file, ~/.tpsgi.ini which is in Config::Simple (key=value) f
     auth        # Authentication module
     domain      # Domain name of the application, used by things like service files
     basedir     # Directory you want to base this out of (defaults to HOME).
+    user        # Who to run as
 
 The idea is that this application is going to be run in a chroot with the user's homedir being the application dir.
 

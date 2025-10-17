@@ -201,6 +201,10 @@ Options are:
 sub new {
     my ($class, %options) = @_;
 
+    # Refuse to run as wrong user, all config will be borked otherwise
+    my $pname = getpwuid($>);
+    die "Must run as configured user!" unless $pname eq ($options{user} // '');
+
     my $self = bless(\%options, $class);
     $self->{ip} = '0.0.0.0';
 
@@ -450,15 +454,16 @@ sub unavailable {
 my $cur_query = {};
 my $debug = $ENV{TPSGI_DEBUG};
 sub app {
-    return eval { _app(@_) } || do {
+    my $self = shift;
+    return eval { _app($self, @_) } || do {
         my $env = shift;
-        $env->{'psgi.errors'}->print($@);
+        $env->{'psgi.errors'}->print($@) if $env->{'psgi.errors'};
 
         # Redact the stack trace past line 1, it usually has things which should not be shown
         $cur_query->{message} = $@;
         $cur_query->{message} =~ s/\n.*//g if $cur_query->{message} && !$debug;
 
-        return _error($cur_query);
+        return $self->error($cur_query);
     };
 }
 
@@ -470,8 +475,8 @@ sub _app {
     my $start = [gettimeofday];
     $cur_query = {};
 
-	# Don't make things group read/write
-	umask 0007;
+    # Don't make things group read/write
+    umask 0007;
 
     my $env = shift;
     $self->{filehandle} = $env->{'psgix.io'} // *STDOUT;
@@ -552,7 +557,7 @@ sub _app {
     $route_actual = $r->[$route_index+1] if defined($route_index);
 
     # Might be a regexed route. Sort reversed so we try the longest routes first.
-    if (!$route_actual) {
+    if (!$route_actual && @$r) {
         my $matched = List::Util::first {
 
             # Here's where you want to use Regexp::Debugger in the context of call.pl to debug routes... EX:

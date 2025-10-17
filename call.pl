@@ -18,7 +18,8 @@ my %env = (
     PATH_INFO      => $ARGV[1],
     QUERY_STRING   => $ARGV[2],
     REQUEST_URI    => "http://$host/".$ARGV[1],
-    HTTP_HOST      => $host
+    HTTP_HOST      => $host,
+    'psgi.errors'    => *STDERR,
 );
 
 sub emit_error {
