@@ -6,8 +6,10 @@ REPLACEME=$(readlink -f $REPLACEME)
 # Make sure we start it with the *right* perl
 PERL5BIN=$(perl -V:scriptdir | sed -e "s/^scriptdir=//g;s/[';]//g")":$PATH"
 
-sed -e "s|__REPLACEME__|$REPLACEME|g;s|__PERL5BIN__|$PERL5BIN|g" $REPLACEME/service/tpsgi.tmpl > $REPLACEME/service/tpsgi.service.intermediate
-sed -e "s|__DOMAIN__|$DOMAIN|g" $REPLACEME/service/tpsgi.service.intermediate > $REPLACEME/service/tpsgi.service
-rm $REPLACEME/service/tpsgi.service.intermediate
+sed -e "s|__REPLACEME__|$REPLACEME|g" \
+    -e "s|__PERL5BIN__|$PERL5BIN|g" \
+    -e "s|__DOMAIN__|$DOMAIN|g" \
+    -e "s|__HOME__|$UHOME|g" \
+    $REPLACEME/service/tpsgi.tmpl > $REPLACEME/service/tpsgi.service
 
 echo "Wrote $REPLACEME/service/tpsgi.service"
