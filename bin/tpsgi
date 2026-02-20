@@ -8,6 +8,7 @@ use strict;
 use warnings;
 
 use FindBin::libs;
+use File::Basename qw{dirname};
 
 use TPSGI;
 
@@ -37,7 +38,10 @@ sub main {
     my (@args) = @_;
 
     my %options = TPSGI::get_config();
-
+    foreach my $route (@{$options{routers}}) {
+        my $libdir = dirname($route);
+        push(@INC, $libdir);
+    }
     return %options;
 }
 

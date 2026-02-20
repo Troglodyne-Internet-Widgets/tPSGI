@@ -203,7 +203,7 @@ sub new {
 
     # Refuse to run as wrong user, all config will be borked otherwise
     my $pname = getpwuid($>);
-    die "Must run as configured user!" unless $pname eq ($options{user} // '');
+    die "Must run as configured user (got: $pname, want: $options{user})!" unless $pname eq ($options{user} // '');
 
     my $self = bless(\%options, $class);
     $self->{ip} = '0.0.0.0';
@@ -562,8 +562,9 @@ sub _app {
 
             # Here's where you want to use Regexp::Debugger in the context of call.pl to debug routes... EX:
             # perl ./call.pl GET /path/to/route
+            print $r->[$_]."\n";
             $path =~ m/^$r->[$_]$/;
-        } 0..scalar(@$r);
+        } 0..scalar(@$r)-1;
         $route_actual = $r->[$matched+1] if defined($matched);
     }
 
