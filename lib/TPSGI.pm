@@ -564,6 +564,9 @@ sub _app {
     # Various stuff important for logging requests
     my $domain = $env->{HTTP_X_FORWARDED_HOST} || $env->{HTTP_HOST} // eval { Sys::Hostname::hostname() };
     my $path   = $env->{PATH_INFO};
+	# de-pooplicate the path
+	$path =~ s|//|/|g;
+
     my $port   = $env->{HTTP_X_FORWARDED_PORT} // $env->{HTTP_PORT};
     my $pport  = defined $port ? ":$port" : "";
     my $scheme = $env->{'psgi.url_scheme'} // 'http';
