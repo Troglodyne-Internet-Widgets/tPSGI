@@ -824,6 +824,33 @@ sub extract_query {
     if ( ref $route->{data} eq 'HASH' ) {
         @$query{ keys( %{ $route->{data} } ) } = values( %{ $route->{data} } );
     }
+
+    # Now that we've parsed the query and know where we want to go,
+	# we should (optionally) murder everything the route does not explicitly want, and validate what it does
+    my $parameters = $route->{parameters};
+    if ($parameters) {
+        die "invalid route definition for $path: bad parameters" unless ref $parameters eq 'HASH';
+        my @known_params = keys(%$parameters);
+        for my $param (@known_params) {
+            die "Invalid route definition for $path: parameter $param must correspond to a validation CODEREF." unless ref $parameters->{$param} eq 'CODE';
+
+            # A missing parameter is not necessarily a problem.
+            next unless $query->{$param};
+
+            # But if we have it, and it's bad, nack it, so that scanners get fail2banned.
+            $self->DEBUG("Rejected $path for bad query param $param");
+            return $self->badrequest($query) unless $parameters->{$param}->( $query->{$param} );
+        }
+
+        # Smack down passing of unnecessary fields
+        foreach my $field ( keys(%$query) ) {
+            next if List::Util::any { $field eq $_ } @known_params;
+            next if List::Util::any { $field eq $_ } qw{start route streaming method fullpath};
+            $self->DEBUG("Rejected $path for query param $field");
+            return $self->badrequest($query);
+        }
+    }
+
     return $query;
 }
 
