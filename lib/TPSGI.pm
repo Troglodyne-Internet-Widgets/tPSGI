@@ -259,6 +259,7 @@ sub new {
 
     $self->{routes}  = \@routes;
     $self->{aliases} = \%aliases;
+	$self->{callbacks} = [];
     return $self;
 }
 
@@ -299,6 +300,7 @@ sub serve {
 
     push( @headers, 'Accept-Ranges' => 'bytes' );
 
+    $self->DEBUG("FETCH $path");
     my $mt         = ( stat($path) )[9];
     my $sz         = ( stat(_) )[7];
     my @gm         = gmtime($mt);
@@ -416,6 +418,30 @@ sub _generic {
     my ( $type, $code ) = @_;
     $type .= Carp::longmess() if $debug;
     return [$code, [$ct => $content_types{html}], ["$type"]];
+}
+
+=head2 redirect, redirect_permanent, see_also
+
+Redirects to the provided page.
+
+=cut
+
+sub redirect {
+	my ($self, $to) = @_;
+    $self->INFO("redirect: $to");
+    return [ 302, [ "Location" => $to, "Content-Length" => 0 ], [''] ];
+}
+
+sub redirect_permanent {
+	my ($self, $to) = @_;
+    $self->INFO("permanent redirect: $to");
+    return [ 301, [ "Location" => $to, "Content-Length" => 0 ], [''] ];
+}
+
+sub see_also {
+	my ($self, $to) = @_;
+    $self->INFO("see also: $to");
+    return [ 303, [ "Location" => $to, "Content-Length" => 0 ], [''] ];
 }
 
 =head2 notfound, forbidden, badrequest, toolong, error
@@ -720,7 +746,8 @@ sub route {
     {
         my $output = $callback->($self, $query);
 
-        # If it's streaming, just hand it off
+        # If it's streaming, just hand it off.
+		# It's up to the caller to handle things like running post-close callbacks in this event.
         return $output if ref $output eq 'CODE';
 
         die "$fullpath returned no or malformed data!" unless ref $output eq 'ARRAY' && @$output == 3;
@@ -733,6 +760,10 @@ sub route {
         # Append server-timing headers if they aren't present
         my $tot = tv_interval($start) * 1000;
         push( @{ $output->[1] }, 'Server-Timing' => "app;dur=$tot" ) unless List::Util::any { $_ eq 'Server-Timing' } @{ $output->[1] };
+
+		# In the event that we have post-close callbacks, go ahead and run them.
+		return $self->stream_raw_psgi($output, $query) if @{$self->{callbacks}};
+
         return $output;
     }
 }
@@ -791,12 +822,42 @@ sub cgi {
     };
 }
 
-sub stream_raw_and_i_mean_it {
-    my ($self, $data, $output, $last_fetch, $to_fork, $callback) = @_;
-    return sub {
-        my $responder = shift;
+# Used primarily when we have post-close callbacks
+sub stream_raw_psgi {
+    my ($self, $response, $data) = @_;
 
-    };
+    my $time_to_here = tv_interval($data->{start});
+    $self->DEBUG("Routing took $time_to_here s");
+    my $post_routing = [gettimeofday];
+
+    my $fh = $self->{filehandle};
+
+    print $fh "HTTP/1.1 $response->[0]\n";
+
+	# Emit the rest of the headers
+	foreach (my $i=0; $i < @{$response->[1]}; $i += 2)  {
+		my $header = $response->[1][$i];
+		my $value  = $response->[1][$i+1];
+		print $fh "$header: $value\n";
+	}
+	print $fh "\n";
+
+	# Emit the body
+	print $fh $response->[2][0];
+
+    close($fh);
+
+    $self->DEBUG("Response written in ".(tv_interval($post_routing))." s");
+	while( my $callback = shift @{$self->{callbacks}}) {
+		if (ref $callback eq 'CODE') {
+			my $post_start = [gettimeofday];
+			local $@;
+			eval { $callback->() };
+			$self->ERROR("Post-close callback encountered exception: $@") if $@;
+			$self->DEBUG("Post-close callback took ".(tv_interval($post_start))." s");
+		}
+	}
+    exit 0;
 }
 
 sub stream_raw_http {
@@ -984,6 +1045,46 @@ sub build_server_timing {
     delete $data->{checkpoints};
 
     return join(', ', @st);
+}
+
+=head2 add_post_close_callback()
+
+Add a thing to do after closing stdout; useful for housekeeping that doesn't need to hold up pageload.
+
+=cut
+
+sub add_post_close_callback {
+	my ($self, $cb) = @_;
+	push(@{$self->{callbacks}}, $cb);
+}
+
+=head2 signal_restart_parent()
+
+Instruct tPSGI to reload after closing stdout.
+
+=cut
+
+sub signal_restart_parent {
+	my ($self) = @_;
+	$self->add_post_close_callback(\&_restart_parent);
+}
+
+# Instruct the parent to restart.  Normally this is HUP, but nginx-unit decides to be special.
+# Don't do anything if running NOHUP=1, which is useful when doing bulk operations
+sub _restart_parent {
+	my $parent = shift;
+    return if $ENV{NOHUP};
+
+    if ( $ENV{PSGI_ENGINE} && $ENV{PSGI_ENGINE} eq 'nginx-unit' ) {
+        my $conf         = Trog::Config->get();
+        my $nginx_socket = $conf->param('nginx-unit.socket');
+        my $client       = HTTP::Tiny::UNIX->new();
+        my $res          = $client->request( 'GET', "http:$nginx_socket//control/applications/tcms/restart" );
+        WARN("could not reload application (got $res->{status} from nginx-unit)!") unless $res->{status} == 200;
+        return 1;
+    }
+    $parent //= getppid;
+    kill 'HUP', $parent;
 }
 
 1;
