@@ -216,9 +216,16 @@ sub new {
     # XXX TODO make these routes able to be fully qualified namespaces (::)!
     no strict 'refs';
     foreach my $route (@{$self->{routers}}) {
+
+        die "No such routing module $route" unless -f $route;
+
         # The router needs to exist and have nonzero numbers of routes.
         my ($package) = basename($route) =~ m/(\S+)\.pm$/;
         my $r = "$package\:\:routes";
+
+        my $libdir = dirname($route);
+        push(@INC, $libdir);
+
         local $@;
         $self->DEBUG("require $route");
         my $success = eval { require $route; 1; };
