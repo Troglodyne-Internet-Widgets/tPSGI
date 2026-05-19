@@ -741,6 +741,9 @@ sub route {
     # GET, POST, URI captures, then explicit data overrides.
     my $query = $self->extract_query( $path, $route, $env );
 
+	# We failed validation if $query isn't a hashref.
+	return $query if ref $query eq 'ARRAY';
+
     # allow this stuff to survive down to the end of some routes
     $query->{last_fetched} = $last_fetch;
     $query->{deflate}      = $deflate;
