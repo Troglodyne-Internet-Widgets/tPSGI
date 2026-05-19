@@ -27,13 +27,13 @@ use Date::Format qw{strftime};
 use List::Util();
 use File::Find;
 use Sys::Hostname();
-use Plack::MIME  ();
+use Plack::MIME ();
 use DateTime::Format::HTTP();
 
 use URL::Encode();
 use File::Touch;
 use File::Path;
-use Cwd qw{abs_path};
+use Cwd            qw{abs_path};
 use File::Basename qw{dirname basename};
 use Log::Dispatch;
 use Log::Dispatch::Screen;
@@ -84,12 +84,13 @@ my %extra_types = (
     '.docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 );
 
-my $ct      = 'Content-type';
+my $ct = 'Content-type';
+
 #memoize
 my $rq;
 
 sub request_id {
-    my ($self, $regenerate) = @_;
+    my ( $self, $regenerate ) = @_;
     return $self->{uuid} if $self->{uuid} && !$regenerate;
     $self->{uuid} = UUID::uuid();
     return $self->{uuid};
@@ -101,12 +102,12 @@ sub log {
     state $log;
     return $log if $log;
 
-    my $LOGNAME = abs_path('.').'/log/tpsgi.log';
+    my $LOGNAME = abs_path('.') . '/log/tpsgi.log';
     $LOGNAME = $self->{custom_log} if $self->{custom_log};
 
     my $LOGDIR = dirname($LOGNAME);
     File::Path::make_path($LOGDIR) unless -d $LOGDIR;
-    File::Touch::touch($LOGNAME) unless -f $LOGNAME;
+    File::Touch::touch($LOGNAME)   unless -f $LOGNAME;
 
     my $LEVEL = $self->{verbose} ? 'debug' : 'info';
 
@@ -130,8 +131,8 @@ sub log {
     $log = Log::Dispatch->new();
     $log->add($rotate);
     $log->add($screen);
-    foreach my $logger (@{$self->{loggers}}) {
-        $log->add($logger->new( min_level => $LEVEL, log_dir => $LOGDIR ));
+    foreach my $logger ( @{ $self->{loggers} } ) {
+        $log->add( $logger->new( min_level => $LEVEL, log_dir => $LOGDIR ) );
     }
 
     $log->info( $self->_log("Opening Log $LOGNAME at $LEVEL level") );
@@ -146,7 +147,7 @@ sub _log {
 
     #XXX Log lines must start as an ISO8601 date, anything else breaks fail2ban's beautiful mind
     my $tstamp = POSIX::strftime "%Y-%m-%dT%H:%M:%SZ", gmtime;
-    my $uuid = $self->request_id();
+    my $uuid   = $self->request_id();
 
     return "[Worker $$] {Request $uuid} $tstamp : $self->{ip} $msg\n";
 }
@@ -154,39 +155,47 @@ sub _log {
 # Logger short cuts
 sub DEBUG {
     my $self = shift;
-    $self->log->debug( $self->_log( shift ) );
+    $self->log->debug( $self->_log(shift) );
 }
+
 sub INFO {
     my $self = shift;
-    $self->log->info( $self->_log( shift ) );
+    $self->log->info( $self->_log(shift) );
 }
+
 sub NOTE {
     my $self = shift;
-    $self->log->notice( $self->_log( shift ) );
+    $self->log->notice( $self->_log(shift) );
 }
+
 sub WARN {
     my $self = shift;
-    $self->log->warning( $self->_log( shift ) );
+    $self->log->warning( $self->_log(shift) );
 }
+
 sub ERROR {
     my $self = shift;
-    $self->log->error( $self->_log( shift ) );
+    $self->log->error( $self->_log(shift) );
 }
+
 sub CRIT {
     my $self = shift;
-    $self->log->critical( $self->_log( shift ) );
+    $self->log->critical( $self->_log(shift) );
 }
+
 sub ALERT {
     my $self = shift;
-    $self->log->alert( $self->_log( shift ) );
+    $self->log->alert( $self->_log(shift) );
 }
+
 sub EMERG {
     my $self = shift;
-    $self->log->emergency( $self->_log( shift ) );
+    $self->log->emergency( $self->_log(shift) );
 }
+
 sub FATAL {
     my $self = shift;
-    $self->log->log_and_die( level => 'emergency', message => $self->_log( shift ) );
+    $self->log->log_and_die( level => 'emergency', message => $self->_log(shift) );
 }
 
 =head1 new(%options)
@@ -202,13 +211,13 @@ Options are:
 =cut
 
 sub new {
-    my ($class, %options) = @_;
+    my ( $class, %options ) = @_;
 
     # Refuse to run as wrong user, all config will be borked otherwise
     my $pname = getpwuid($>);
-    die "Must run as configured user (got: $pname, want: $options{user})!" unless $pname eq ($options{user} // '');
+    die "Must run as configured user (got: $pname, want: $options{user})!" unless $pname eq ( $options{user} // '' );
 
-    my $self = bless(\%options, $class);
+    my $self = bless( \%options, $class );
     $self->{ip} = '0.0.0.0';
 
     my @routes;
@@ -216,50 +225,51 @@ sub new {
 
     # XXX TODO make these routes able to be fully qualified namespaces (::)!
     no strict 'refs';
-    foreach my $route (@{$self->{routers}}) {
+    foreach my $route ( @{ $self->{routers} } ) {
 
         die "No such routing module $route" unless -f $route;
 
         # The router needs to exist and have nonzero numbers of routes.
         my ($package) = basename($route) =~ m/(\S+)\.pm$/;
-        my $r = "$package\:\:routes";
-        my $a = "$package\:\:aliases";
+        my $r         = "$package\:\:routes";
+        my $a         = "$package\:\:aliases";
 
         my $libdir = dirname($route);
-        push(@INC, $libdir);
+        push( @INC, $libdir );
 
         local $@;
         $self->DEBUG("require $route");
         my $success = eval { require $route; 1; };
         if ($success) {
             my $pkg_routes = *$r{ARRAY};
-            for (my $i=0; $i < @$pkg_routes; $i += 2) {
+            for ( my $i = 0; $i < @$pkg_routes; $i += 2 ) {
                 $self->DEBUG("Registered route $pkg_routes->[$i]");
             }
-            push(@routes,@$pkg_routes);
+            push( @routes, @$pkg_routes );
 
             my $pkg_aliases = *$a{HASH};
-            foreach my $al (keys(%$pkg_aliases)) {
+            foreach my $al ( keys(%$pkg_aliases) ) {
                 $self->DEBUG("aliased route $al to $pkg_aliases->{$al}");
             }
-            @aliases{keys(%$pkg_aliases)} = values(%$pkg_aliases);
-        } else {
+            @aliases{ keys(%$pkg_aliases) } = values(%$pkg_aliases);
+        }
+        else {
             die "Could not load $route!\n$@\n";
         }
     }
     use strict 'refs';
 
     # Set the pattern used to discover the route if needed later.
-    for (my $i=0; $i < scalar(@routes); $i += 2 ) {
-        $routes[$i+1]{pattern} = $routes[$i];
+    for ( my $i = 0; $i < scalar(@routes); $i += 2 ) {
+        $routes[ $i + 1 ]{pattern} = $routes[$i];
     }
 
-    $self->{indices} //=[];
-    $self->{indices} = [@{$self->{indices}},qw{index.html index.htm index.cgi}];
+    $self->{indices} //= [];
+    $self->{indices} = [ @{ $self->{indices} }, qw{index.html index.htm index.cgi} ];
 
-    $self->{routes}  = \@routes;
-    $self->{aliases} = \%aliases;
-	$self->{callbacks} = [];
+    $self->{routes}    = \@routes;
+    $self->{aliases}   = \%aliases;
+    $self->{callbacks} = [];
     return $self;
 }
 
@@ -359,6 +369,7 @@ sub serve {
 
 sub _range {
     my ( $self, $fullpath, $fh, $ranges, $sz, %headers ) = @_;
+
     # Set mode
     my $primary_ct   = "Content-Type: $headers{'Content-type'}";
     my $is_multipart = scalar(@$ranges) > 1;
@@ -417,7 +428,7 @@ sub _range {
 sub _generic {
     my ( $type, $code ) = @_;
     $type .= Carp::longmess() if $debug;
-    return [$code, [$ct => $content_types{html}], ["$type"]];
+    return [ $code, [ $ct => $content_types{html} ], ["$type"] ];
 }
 
 =head2 redirect, redirect_permanent, see_also
@@ -427,19 +438,19 @@ Redirects to the provided page.
 =cut
 
 sub redirect {
-	my ($self, $to) = @_;
+    my ( $self, $to ) = @_;
     $self->INFO("redirect: $to");
     return [ 302, [ "Location" => $to, "Content-Length" => 0 ], [''] ];
 }
 
 sub redirect_permanent {
-	my ($self, $to) = @_;
+    my ( $self, $to ) = @_;
     $self->INFO("permanent redirect: $to");
     return [ 301, [ "Location" => $to, "Content-Length" => 0 ], [''] ];
 }
 
 sub see_also {
-	my ($self, $to) = @_;
+    my ( $self, $to ) = @_;
     $self->INFO("see also: $to");
     return [ 303, [ "Location" => $to, "Content-Length" => 0 ], [''] ];
 }
@@ -457,36 +468,36 @@ If you need to return these HTTP errors, return these within a route:
 =cut
 
 sub notfound {
-    my ($self, $query, $body) = @_;
+    my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 404 $query->{fullpath}");
     $body //= 'Not Found';
     return _generic( $body, 404 );
 }
 
 sub forbidden {
-    my ($self, $query, $body) = @_;
+    my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 403 $query->{fullpath}");
     $body //= 'Forbidden';
     return _generic( $body, 403 );
 }
 
 sub badrequest {
-    my ($self, $query, $body) = @_;
+    my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 400 $query->{fullpath}");
     $body //= 'Bad Request';
     return _generic( $body, 400 );
 }
 
 sub toolong {
-    my ($self, $query, $body) = @_;
+    my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 419 $query->{fullpath}");
     $body //= 'URI too long';
     return _generic( $body, 419 );
 }
 
 sub error {
-    my ($self, $query, $body) = @_;
-    my $method = $query->{method} // "?";
+    my ( $self, $query, $body ) = @_;
+    my $method = $query->{method}   // "?";
     my $fp     = $query->{fullpath} // "?";
     $body //= 'Internal Server Error';
     $self->INFO("$method 500 $fp");
@@ -494,16 +505,17 @@ sub error {
 }
 
 sub unavailable {
-    my ($self, $query, $body) = @_;
+    my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 503 $query->{fullpath}");
     $body //= 'Service Unavailable';
     return _generic( $body, 503 );
 }
 
 my $cur_query = {};
+
 sub app {
     my $self = shift;
-    return eval { _app($self, @_) } || do {
+    return eval { _app( $self, @_ ) } || do {
         my $env = shift;
         $env->{'psgi.errors'}->print($@) if $env->{'psgi.errors'};
 
@@ -516,6 +528,7 @@ sub app {
 }
 
 my %etags;
+
 sub _app {
     my $self = shift;
 
@@ -533,11 +546,11 @@ sub _app {
     $env->{REQUEST_ID} = $self->request_id(1);
 
     # Discard the path used in the log, it's too long and enough 4xx error code = ban
-    return $self->toolong({ method => $env->{REQUEST_METHOD}, fullpath => '...' }) if length( $env->{REQUEST_URI} ) > 2048;
+    return $self->toolong( { method => $env->{REQUEST_METHOD}, fullpath => '...' } ) if length( $env->{REQUEST_URI} ) > 2048;
 
     # Various stuff important for logging requests
     my $domain = $env->{HTTP_X_FORWARDED_HOST} || $env->{HTTP_HOST} // eval { Sys::Hostname::hostname() };
-    my $path = $env->{PATH_INFO};
+    my $path   = $env->{PATH_INFO};
     my $port   = $env->{HTTP_X_FORWARDED_PORT} // $env->{HTTP_PORT};
     my $pport  = defined $port ? ":$port" : "";
     my $scheme = $env->{'psgi.url_scheme'} // 'http';
@@ -546,22 +559,22 @@ sub _app {
     # It's important that we log what the user ACTUALLY requested rather than the rewritten path later on.
     my $fullpath = "$scheme://$domain$pport$path";
 
-	# So we can log it for fail2ban
-	my $ip = $env->{HTTP_X_FORWARDED_FOR} || $env->{REMOTE_ADDR};
+    # So we can log it for fail2ban
+    my $ip = $env->{HTTP_X_FORWARDED_FOR} || $env->{REMOTE_ADDR};
 
-	# set the referer & ua to go into DB logs, but not logs in general.
+    # set the referer & ua to go into DB logs, but not logs in general.
     # The referer/ua largely has no importance beyond being a proto bug report for log messages.
     my $referer = $env->{HTTP_REFERER};
     my $ua      = $env->{HTTP_UA};
 
     $cur_query = {
-		route    => $path,
-		fullpath => $path,
-		method   => $method,
-		ip       => $ip,
-		ua       => $ua,
-		referer  => $referer,
-	};
+        route    => $path,
+        fullpath => $path,
+        method   => $method,
+        ip       => $ip,
+        ua       => $ua,
+        referer  => $referer,
+    };
 
     # Support aliased paths
     my $aliases = $self->{aliases};
@@ -569,7 +582,7 @@ sub _app {
 
     # Check eTags.  If we don't know about it, just assume it's good and lazily fill the cache
     # XXX yes, this allows cache poisoning...but only for logged in users!
-	# This also needs to be IN DB so that we coordinate properly across forks
+    # This also needs to be IN DB so that we coordinate properly across forks
     if ( $env->{HTTP_IF_NONE_MATCH} ) {
         $self->INFO("$env->{REQUEST_METHOD} 304 $fullpath");
         return [ 304, [], [''] ] if $env->{HTTP_IF_NONE_MATCH} eq ( $etags{ $env->{REQUEST_URI} } || '' );
@@ -603,32 +616,33 @@ sub _app {
     my $streaming = $env->{'psgi.streaming'};
 
     # If we have an actual route, just use it.
-    my $r = $self->routes;
-    my $route_index = List::Util::first { ($r->[$_] // '') eq $path } 0..scalar(@$r);
+    my $r           = $self->routes;
+    my $route_index = List::Util::first { ( $r->[$_] // '' ) eq $path } 0 .. scalar(@$r);
     my $route_actual;
-    $route_actual = $r->[$route_index+1] if defined($route_index);
+    $route_actual = $r->[ $route_index + 1 ] if defined($route_index);
 
     # Might be a regexed route. Sort reversed so we try the longest routes first.
-    if (!$route_actual && @$r) {
+    if ( !$route_actual && @$r ) {
         my $matched = List::Util::first {
 
             # Here's where you want to use Regexp::Debugger in the context of call.pl to debug routes... EX:
             # perl ./call.pl GET /path/to/route
             #print $r->[$_]."\n";
             $path =~ m/^$r->[$_]$/;
-        } 0..scalar(@$r)-1;
-        $route_actual = $r->[$matched+1] if defined($matched);
+        }
+        0 .. scalar(@$r) - 1;
+        $route_actual = $r->[ $matched + 1 ] if defined($matched);
     }
 
     return $self->route( $route_actual, $env, $fullpath, $path, $start, $last_fetch, $deflate, $domain, $port ) if $route_actual;
 
     # Do a case insensitive match, because osx and windows
     my $file_possible = $self->mangle_filename("www/$path");
-    my $file_actual = $file_possible if -f $file_possible;
+    my $file_actual   = $file_possible if -f $file_possible;
 
     # Dirindices
-    if (-d $file_possible) {
-        foreach my $index (@{$self->indices}) {
+    if ( -d $file_possible ) {
+        foreach my $index ( @{ $self->indices } ) {
             next if $file_actual;
             my $dirindex = $self->mangle_filename("www$path/$index");
             $dirindex =~ s|//|/|g;
@@ -637,16 +651,17 @@ sub _app {
     }
 
     my $file_is_cgi = appears_executable($file_actual);
-    return $self->cgi( $env, $fullpath, $file_actual, $last_fetch, $deflate) if $file_is_cgi;
+    return $self->cgi( $env, $fullpath, $file_actual, $last_fetch, $deflate ) if $file_is_cgi;
 
-    $self->INFO("Attempting to serve $fullpath [".($file_possible // "")."]");
+    $self->INFO( "Attempting to serve $fullpath [" . ( $file_possible // "" ) . "]" );
     my @ranges = parse_ranges($env);
     return $self->serve( $fullpath, $file_actual, $start, $streaming, \@ranges, $last_fetch, $deflate ) if $file_actual;
     return $self->notfound($cur_query);
 }
 
 sub mangle_filename {
-    my ($self,$path) = @_;
+    my ( $self, $path ) = @_;
+
     # XXX yes, you can have case sensitive OSX, but basically nobody enables that ever
     $path = lc($path) if List::Util::any { $^O eq $_ } qw{darwin MSWin32 dos};
     $self->DEBUG("Path mangled to $path");
@@ -655,6 +670,7 @@ sub mangle_filename {
 
 sub parse_ranges {
     my $env = shift;
+
     # Handle HTTP range/streaming requests
     my $range = $env->{HTTP_RANGE} || "bytes=0-" if $env->{HTTP_RANGE} || $env->{HTTP_IF_RANGE};
 
@@ -663,17 +679,17 @@ sub parse_ranges {
         $range =~ s/bytes=//g;
         push(
             @ranges,
-            map {
-                [ split( /-/, $_ ) ];
-            } split( /,/, $range )
+            map { [ split( /-/, $_ ) ]; } split( /,/, $range )
         );
     }
     return @ranges;
 }
 
 my @executable_extensions = qw{cgi sh exe pl php py};
+
 sub appears_executable {
     my $subj = shift;
+
     # Definitely not executable if it does not exist!
     return 0 unless $subj;
     return 0 unless -x $subj;
@@ -685,18 +701,19 @@ sub appears_executable {
 
 # Handle actual routes
 sub route {
-    my ($self, $route, $env, $fullpath, $path, $start, $last_fetch, $deflate, $domain, $port ) = @_;
+    my ( $self, $route, $env, $fullpath, $path, $start, $last_fetch, $deflate, $domain, $port ) = @_;
 
-    $self->DEBUG('Executing route '.$route->{pattern});
+    $self->DEBUG( 'Executing route ' . $route->{pattern} );
 
-    my $content_type = $env->{CONTENT_TYPE} || 'text/html'; # If not set, that's the assumption.
-    # It is the responsibility of each route to respond to HEAD requests correctly
-    return $self->badrequest($cur_query) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } grep { defined $_ } ('HEAD', $route->{method});
+    my $content_type = $env->{CONTENT_TYPE} || 'text/html';    # If not set, that's the assumption.
+                                                               # It is the responsibility of each route to respond to HEAD requests correctly
+    return $self->badrequest($cur_query) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } grep { defined $_ } ( 'HEAD', $route->{method} );
 
     my $callback;
-    if (exists $route->{callbacks}{'*'}) {
+    if ( exists $route->{callbacks}{'*'} ) {
         $callback = $route->{callbacks}{'*'};
-    } else {
+    }
+    else {
         return $self->badrequest($cur_query) unless exists $route->{callbacks}{$content_type};
         $callback = $route->{callbacks}{$content_type};
     }
@@ -709,67 +726,68 @@ sub route {
 
     # Build the query data for passing to a route.
     # GET, POST, URI captures, then explicit data overrides.
-    my $query = $self->extract_query($path, $route, $env);
+    my $query = $self->extract_query( $path, $route, $env );
 
     # allow this stuff to survive down to the end of some routes
     $query->{last_fetched} = $last_fetch;
     $query->{deflate}      = $deflate;
     $query->{streaming}    = $streaming;
     my @ranges = parse_ranges($env);
-    $query->{ranges}       = \@ranges;
-    $query->{start}        = $start;
+    $query->{ranges} = \@ranges;
+    $query->{start}  = $start;
+
     # Put things to tv_interval in here for Server-Timing
-    $query->{fullpath}     = $fullpath;
-    $query->{method}       = $route->{method};
-    $query->{route}        = $path;
-    $query->{cookies}      = $env->{HTTP_COOKIE};
-    $query->{dnt}          = $env->{HTTP_DNT};
-    $query->{nosellinfo}   = $env->{HTTP_SEC_GPC};
-    $query->{port}         = $port;
-    $query->{scheme}       = $env->{'psgi.url_scheme'} // 'http';
-    $query->{method}       = $env->{REQUEST_METHOD};
-    $query->{lang}         = $env->{HTTP_ACCEPT_LANGUAGE};
-    $query->{accept}       = $env->{HTTP_ACCEPT};
-    $query->{has_query}    = !!$env->{QUERY_STRING};
-    $query->{domain}       = $domain;
-    $query->{dispatcher}   = $route;
-    $query->{ip}           = $cur_query->{ip};
-    $query->{ua}           = $cur_query->{ua};
-    $query->{referer}      = $cur_query->{referer};
+    $query->{fullpath}   = $fullpath;
+    $query->{method}     = $route->{method};
+    $query->{route}      = $path;
+    $query->{cookies}    = $env->{HTTP_COOKIE};
+    $query->{dnt}        = $env->{HTTP_DNT};
+    $query->{nosellinfo} = $env->{HTTP_SEC_GPC};
+    $query->{port}       = $port;
+    $query->{scheme}     = $env->{'psgi.url_scheme'} // 'http';
+    $query->{method}     = $env->{REQUEST_METHOD};
+    $query->{lang}       = $env->{HTTP_ACCEPT_LANGUAGE};
+    $query->{accept}     = $env->{HTTP_ACCEPT};
+    $query->{has_query}  = !!$env->{QUERY_STRING};
+    $query->{domain}     = $domain;
+    $query->{dispatcher} = $route;
+    $query->{ip}         = $cur_query->{ip};
+    $query->{ua}         = $cur_query->{ua};
+    $query->{referer}    = $cur_query->{referer};
 
     # This allows for better error handlers if we die in the route.
     $cur_query = $query;
 
     # Setup the CGI vars they expect IF requested
-    local %ENV = (%ENV, CGI::Emulate::PSGI->emulate_environment($env)) if $route->{env};
+    local %ENV = ( %ENV, CGI::Emulate::PSGI->emulate_environment($env) ) if $route->{env};
 
     {
-        my $output = $callback->($self, $query);
+        my $output = $callback->( $self, $query );
 
         # If it's streaming, just hand it off.
-		# It's up to the caller to handle things like running post-close callbacks in this event.
+        # It's up to the caller to handle things like running post-close callbacks in this event.
         return $output if ref $output eq 'CODE';
 
         die "$fullpath returned no or malformed data!" unless ref $output eq 'ARRAY' && @$output == 3;
 
-        my $pport = defined $query->{port} ? ":$query->{port}" : "";
-        my %headers = @{$output->[1]};
-        my $bytes = $headers{'Content-Length'} // '?';
+        my $pport   = defined $query->{port} ? ":$query->{port}" : "";
+        my %headers = @{ $output->[1] };
+        my $bytes   = $headers{'Content-Length'} // '?';
         $self->INFO("$env->{REQUEST_METHOD} $output->[0] $bytes $fullpath");
 
         # Append server-timing headers if they aren't present
         my $tot = tv_interval($start) * 1000;
         push( @{ $output->[1] }, 'Server-Timing' => "app;dur=$tot" ) unless List::Util::any { $_ eq 'Server-Timing' } @{ $output->[1] };
 
-		# In the event that we have post-close callbacks, go ahead and run them.
-		return $self->stream_raw_psgi($output, $query) if @{$self->{callbacks}};
+        # In the event that we have post-close callbacks, go ahead and run them.
+        return $self->stream_raw_psgi( $output, $query ) if @{ $self->{callbacks} };
 
         return $output;
     }
 }
 
 sub extract_query {
-    my ($self, $path, $route, $env) = @_;
+    my ( $self, $path, $route, $env ) = @_;
 
     my $query = URL::Encode::url_params_mixed( $env->{QUERY_STRING} ) if $env->{QUERY_STRING};
 
@@ -785,13 +803,13 @@ sub extract_query {
         @$query{ keys( %{ $body->upload } ) } = values( %{ $body->upload } );
     }
 
-    if (ref $route->{captures} eq 'ARRAY') {
-       my @captures = $path =~ m/^$route->{pattern}$/;
-       @$query{@{$route->{captures}}} = @captures;
+    if ( ref $route->{captures} eq 'ARRAY' ) {
+        my @captures = $path =~ m/^$route->{pattern}$/;
+        @$query{ @{ $route->{captures} } } = @captures;
     }
 
-    if (ref $route->{data} eq 'HASH') {
-        @$query{keys(%{$route->{data}})} = values(%{$route->{data}});
+    if ( ref $route->{data} eq 'HASH' ) {
+        @$query{ keys( %{ $route->{data} } ) } = values( %{ $route->{data} } );
     }
     return $query;
 }
@@ -799,14 +817,14 @@ sub extract_query {
 # Read until we are done with headers, then pass off the filehandle to PSGI for streaming.
 # TODO support compression
 sub cgi {
-    my ( $self, $env, $fullpath, $file_actual, $last_fetch, $deflate) = @_;
+    my ( $self, $env, $fullpath, $file_actual, $last_fetch, $deflate ) = @_;
     $self->INFO("Handoff $fullpath to $file_actual for cgi exec");
 
     # Setup the CGI vars they expect
-    local %ENV = (%ENV, CGI::Emulate::PSGI->emulate_environment($env));
+    local %ENV = ( %ENV, CGI::Emulate::PSGI->emulate_environment($env) );
 
-    my $pid = open(my $out, '-|', "$file_actual");
-    my ($code, $offset, %headers) = extract_headers($out, $last_fetch);
+    my $pid = open( my $out, '-|', "$file_actual" );
+    my ( $code, $offset, %headers ) = extract_headers( $out, $last_fetch );
     $code //= 500;
     return sub {
         my $responder = shift;
@@ -816,17 +834,18 @@ sub cgi {
             $writer->write($buf);
         }
         $writer->close;
+
         # Wait on the CGI script to do whatever it's doing after closing stdout
         close $out;
-        waitpid($pid, 0);
+        waitpid( $pid, 0 );
     };
 }
 
 # Used primarily when we have post-close callbacks
 sub stream_raw_psgi {
-    my ($self, $response, $data) = @_;
+    my ( $self, $response, $data ) = @_;
 
-    my $time_to_here = tv_interval($data->{start});
+    my $time_to_here = tv_interval( $data->{start} );
     $self->DEBUG("Routing took $time_to_here s");
     my $post_routing = [gettimeofday];
 
@@ -834,36 +853,36 @@ sub stream_raw_psgi {
 
     print $fh "HTTP/1.1 $response->[0]\n";
 
-	# Emit the rest of the headers
-	foreach (my $i=0; $i < @{$response->[1]}; $i += 2)  {
-		my $header = $response->[1][$i];
-		my $value  = $response->[1][$i+1];
-		print $fh "$header: $value\n";
-	}
-	print $fh "\n";
+    # Emit the rest of the headers
+    foreach ( my $i = 0; $i < @{ $response->[1] }; $i += 2 ) {
+        my $header = $response->[1][$i];
+        my $value  = $response->[1][ $i + 1 ];
+        print $fh "$header: $value\n";
+    }
+    print $fh "\n";
 
-	# Emit the body
-	print $fh $response->[2][0];
+    # Emit the body
+    print $fh $response->[2][0];
 
     close($fh);
 
-    $self->DEBUG("Response written in ".(tv_interval($post_routing))." s");
-	while( my $callback = shift @{$self->{callbacks}}) {
-		if (ref $callback eq 'CODE') {
-			my $post_start = [gettimeofday];
-			local $@;
-			eval { $callback->() };
-			$self->ERROR("Post-close callback encountered exception: $@") if $@;
-			$self->DEBUG("Post-close callback took ".(tv_interval($post_start))." s");
-		}
-	}
+    $self->DEBUG( "Response written in " . ( tv_interval($post_routing) ) . " s" );
+    while ( my $callback = shift @{ $self->{callbacks} } ) {
+        if ( ref $callback eq 'CODE' ) {
+            my $post_start = [gettimeofday];
+            local $@;
+            eval { $callback->() };
+            $self->ERROR("Post-close callback encountered exception: $@") if $@;
+            $self->DEBUG( "Post-close callback took " . ( tv_interval($post_start) ) . " s" );
+        }
+    }
     exit 0;
 }
 
 sub stream_raw_http {
-    my ($self, $data, $last_fetch, $to_fork, $callback, $error_handler) = @_;
+    my ( $self, $data, $last_fetch, $to_fork, $callback, $error_handler ) = @_;
 
-    my $time_to_here = tv_interval($data->{start});
+    my $time_to_here = tv_interval( $data->{start} );
     $self->DEBUG("Routing took $time_to_here s");
     my $post_routing = [gettimeofday];
 
@@ -872,43 +891,47 @@ sub stream_raw_http {
     # The CGIs you are executing here SHOULD NOT emit a status line.
     # Most apache CGIs you find don't anyways, so this is usually not a big deal.
     print $fh "HTTP/1.1 200 OK\n";
+
     # Emit our server-timing header.
-    print $fh "Server-Timing: ".$self->build_server_timing($data)."\n"; #app;dur=".($time_to_here*1000)."\n";
+    print $fh "Server-Timing: " . $self->build_server_timing($data) . "\n";    #app;dur=".($time_to_here*1000)."\n";
 
     # We *must* fork because we can't rely on the child to close stdout.
-    my $pid = _fork(sub {
-        $self->DEBUG("Forking child took".(tv_interval($post_routing))." s");
-        local $@;
-        eval { $to_fork->() };
-        $self->ERROR("Raw HTTTP streaming encountered exception: $@") if $@;
-        if (ref $error_handler eq 'CODE') {
+    my $pid = _fork(
+        sub {
+            $self->DEBUG( "Forking child took" . ( tv_interval($post_routing) ) . " s" );
             local $@;
-            eval { $error_handler->() };
-            $self->ERROR("HTTP streaming error handler encountered exception: $@") if $@;
-        }
-    }, $fh);
+            eval { $to_fork->() };
+            $self->ERROR("Raw HTTTP streaming encountered exception: $@") if $@;
+            if ( ref $error_handler eq 'CODE' ) {
+                local $@;
+                eval { $error_handler->() };
+                $self->ERROR("HTTP streaming error handler encountered exception: $@") if $@;
+            }
+        },
+        $fh
+    );
 
-    waitpid($pid, 0);
+    waitpid( $pid, 0 );
     close($fh);
 
-    $self->DEBUG("Response written in ".(tv_interval($post_routing))." s");
-    if (ref $callback eq 'CODE') {
+    $self->DEBUG( "Response written in " . ( tv_interval($post_routing) ) . " s" );
+    if ( ref $callback eq 'CODE' ) {
         my $post_start = [gettimeofday];
         local $@;
         eval { $callback->() };
         $self->ERROR("Post-close callback encountered exception: $@") if $@;
-        $self->DEBUG("Post-close callback took ".(tv_interval($post_start))." s");
+        $self->DEBUG( "Post-close callback took " . ( tv_interval($post_start) ) . " s" );
     }
     exit 0;
 }
 
 sub _fork {
-    my ($callback, $fh) = @_;
+    my ( $callback, $fh ) = @_;
     select $fh;
-    $|=1;
+    $| = 1;
     my $pid = fork();
     die "Could not fork child" unless defined $pid;
-    if ($pid == 0) {
+    if ( $pid == 0 ) {
         $callback->();
         exit 0;
     }
@@ -925,7 +948,7 @@ Returns a code and parsed headers hash.  Code will be 304 if the file hasn't cha
 =cut
 
 sub extract_headers {
-    my ($fh, $last_fetch, $is_ref) = @_;
+    my ( $fh, $last_fetch, $is_ref ) = @_;
     my $headers = '';
 
     # NOTE: this is relying on while advancing the file pointer
@@ -933,21 +956,22 @@ sub extract_headers {
         last if $_ eq "\n";
         $headers .= $_;
     }
+
     #XXX still a toctou
     my $offset = $fh->tell();
     my ( undef, undef, $status, undef, $headers_parsed ) = HTTP::Parser::XS::parse_http_response( "$headers\n", HEADERS_AS_HASHREF );
 
     my $code = $status // 200;
     $headers_parsed //= {};
-    if (!$is_ref) {
+    if ( !$is_ref ) {
         my $mt         = ( stat($fh) )[9];
         my @gm         = gmtime($mt);
         my $now_string = strftime( "%a, %d %b %Y %H:%M:%S GMT", @gm );
-        $code       = $mt > $last_fetch ? $status : 304;
+        $code = $mt > $last_fetch ? $status : 304;
         $headers_parsed->{"Last-Modified"} = $now_string;
     }
 
-    return ($code, $offset, %$headers_parsed);
+    return ( $code, $offset, %$headers_parsed );
 }
 
 sub static {
@@ -957,8 +981,8 @@ sub static {
 
     # XXX because of psgi I can't just vomit the file directly
     if ( open( my $fh, '<', "statics/$path" ) ) {
-        my ($code, $offset, $headers_parsed) = (200, undef, {});
-        ($code, $offset, %$headers_parsed) = extract_headers($fh, $last_fetch );
+        my ( $code, $offset, $headers_parsed ) = ( 200, undef, {} );
+        ( $code, $offset, %$headers_parsed ) = extract_headers( $fh, $last_fetch );
 
         # Append server-timing headers
         my $tot = tv_interval($start) * 1000;
@@ -985,7 +1009,7 @@ sub static {
 
         return [ $code, [%$headers_parsed], $fh ];
     }
-    return $self->forbidden($self->{current_query});
+    return $self->forbidden( $self->{current_query} );
 }
 
 sub get_config {
@@ -1002,17 +1026,17 @@ sub get_config {
         basedir    => $ENV{'HOME'},
     );
     my $config_file = "$ENV{HOME}/.tpsgi.ini";
-    if (-f $config_file) {
+    if ( -f $config_file ) {
         my $conf = Config::Simple->new($config_file);
         my %config;
-        %config = %{$conf->param(-block => 'default')} if $conf;
+        %config = %{ $conf->param( -block => 'default' ) } if $conf;
 
         # Merge the configuration with the options
-        foreach my $opt (keys(%options)) {
+        foreach my $opt ( keys(%options) ) {
             if ( ref $options{$opt} eq 'ARRAY' ) {
                 next unless exists $config{$opt};
-                my @arrayed = ref $config{$opt} eq 'ARRAY' ? @{$config{$opt}} : ($config{$opt});
-                push(@{$options{$opt}}, @arrayed);
+                my @arrayed = ref $config{$opt} eq 'ARRAY' ? @{ $config{$opt} } : ( $config{$opt} );
+                push( @{ $options{$opt} }, @arrayed );
                 next;
             }
             $options{$opt} = $config{$opt} if exists $config{$opt};
@@ -1023,28 +1047,28 @@ sub get_config {
 
 # Convenience method to keep track of server-timing
 sub checkpoint {
-    my ($self, $data, $name) = @_;
-    $data->{checkpoints} //= [[ start => $data->{start} ]];
-    push(@{$data->{checkpoints}}, [ $name => [gettimeofday] ]);
+    my ( $self, $data, $name ) = @_;
+    $data->{checkpoints} //= [ [ start => $data->{start} ] ];
+    push( @{ $data->{checkpoints} }, [ $name => [gettimeofday] ] );
 }
 
 sub build_server_timing {
-    my ($self, $data) = @_;
+    my ( $self, $data ) = @_;
     my @st;
     my $last_interval;
-    foreach my $checkpoint (@{$data->{checkpoints}}) {
+    foreach my $checkpoint ( @{ $data->{checkpoints} } ) {
         if ($last_interval) {
-            my $dur = tv_interval($last_interval, $checkpoint->[1]) * 1000;
-            push(@st, "$checkpoint->[0];dur=$dur");
+            my $dur = tv_interval( $last_interval, $checkpoint->[1] ) * 1000;
+            push( @st, "$checkpoint->[0];dur=$dur" );
         }
         $last_interval = $checkpoint->[1];
     }
-    my $tot = tv_interval($data->{start}) * 1000;
-    push(@st, "tot;dur=$tot");
+    my $tot = tv_interval( $data->{start} ) * 1000;
+    push( @st, "tot;dur=$tot" );
 
     delete $data->{checkpoints};
 
-    return join(', ', @st);
+    return join( ', ', @st );
 }
 
 =head2 add_post_close_callback()
@@ -1054,8 +1078,8 @@ Add a thing to do after closing stdout; useful for housekeeping that doesn't nee
 =cut
 
 sub add_post_close_callback {
-	my ($self, $cb) = @_;
-	push(@{$self->{callbacks}}, $cb);
+    my ( $self, $cb ) = @_;
+    push( @{ $self->{callbacks} }, $cb );
 }
 
 =head2 signal_restart_parent()
@@ -1065,14 +1089,14 @@ Instruct tPSGI to reload after closing stdout.
 =cut
 
 sub signal_restart_parent {
-	my ($self) = @_;
-	$self->add_post_close_callback(\&_restart_parent);
+    my ($self) = @_;
+    $self->add_post_close_callback( \&_restart_parent );
 }
 
 # Instruct the parent to restart.  Normally this is HUP, but nginx-unit decides to be special.
 # Don't do anything if running NOHUP=1, which is useful when doing bulk operations
 sub _restart_parent {
-	my $parent = shift;
+    my $parent = shift;
     return if $ENV{NOHUP};
 
     if ( $ENV{PSGI_ENGINE} && $ENV{PSGI_ENGINE} eq 'nginx-unit' ) {
