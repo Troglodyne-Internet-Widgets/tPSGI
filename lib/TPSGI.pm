@@ -51,6 +51,9 @@ BEGIN {
     mkdir "$basedir/prof";
 }
 
+# We have a DEBUG var which is plus ultra for extra sensitive stuff beyond just passing verbose
+my $debug = $ENV{TPSGI_DEBUG};
+
 #1MB chunks
 our $CHUNK_SEP  = 'perlfsSep666YOLO42069';
 our $CHUNK_SIZE = 1024000;
@@ -217,10 +220,13 @@ sub new {
         my ($package) = basename($route) =~ m/(\S+)\.pm$/;
         my $r = "$package\:\:routes";
         local $@;
-        $self->INFO("require $route");
+        $self->DEBUG("require $route");
         my $success = eval { require $route; 1; };
         if ($success) {
             my $pkg_routes = *$r{ARRAY};
+            for (my $i=0; $i < @$pkg_routes; $i += 2) {
+                $self->DEBUG("Registered route $pkg_routes->[$i]");
+            }
             push(@routes,@$pkg_routes);
         } else {
             die "Could not load $route!\n$@\n";
@@ -392,6 +398,7 @@ sub _range {
 
 sub _generic {
     my ( $type, $code ) = @_;
+    $type .= Carp::longmess() if $debug;
     return [$code, [$ct => $content_types{html}], ["$type"]];
 }
 
@@ -418,7 +425,7 @@ sub forbidden {
     my ($self, $query, $body) = @_;
     $self->INFO("$query->{method} 403 $query->{fullpath}");
     $body //= 'Forbidden';
-    return _generic( 'Forbidden', 403 );
+    return _generic( $body, 403 );
 }
 
 sub badrequest {
@@ -452,7 +459,6 @@ sub unavailable {
 }
 
 my $cur_query = {};
-my $debug = $ENV{TPSGI_DEBUG};
 sub app {
     my $self = shift;
     return eval { _app($self, @_) } || do {
@@ -635,9 +641,11 @@ sub appears_executable {
 sub route {
     my ($self, $route, $env, $fullpath, $path, $start, $last_fetch, $deflate ) = @_;
 
+    $self->DEBUG('Executing route '.$route->{pattern});
+
     my $content_type = $env->{CONTENT_TYPE} || 'text/html'; # If not set, that's the assumption.
     # It is the responsibility of each route to respond to HEAD requests correctly
-    return $self->badrequest($cur_query) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } ('HEAD', $route->{method});
+    return $self->badrequest($cur_query) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } grep { defined $_ } ('HEAD', $route->{method});
 
     my $callback;
     if (exists $route->{callbacks}{'*'}) {

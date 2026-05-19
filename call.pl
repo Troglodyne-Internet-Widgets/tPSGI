@@ -30,6 +30,10 @@ sub emit_error {
 
 our $app = sub {
     my %cfg = TPSGI::get_config();
+
+    # We are debugging here
+    $cfg{verbose} = 1;
+
     my $self = TPSGI->new(%cfg);
     local $@;
 
