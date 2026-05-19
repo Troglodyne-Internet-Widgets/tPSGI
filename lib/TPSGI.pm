@@ -212,6 +212,7 @@ sub new {
     $self->{ip} = '0.0.0.0';
 
     my @routes;
+    my %aliases;
 
     # XXX TODO make these routes able to be fully qualified namespaces (::)!
     no strict 'refs';
@@ -222,6 +223,7 @@ sub new {
         # The router needs to exist and have nonzero numbers of routes.
         my ($package) = basename($route) =~ m/(\S+)\.pm$/;
         my $r = "$package\:\:routes";
+        my $a = "$package\:\:aliases";
 
         my $libdir = dirname($route);
         push(@INC, $libdir);
@@ -235,6 +237,12 @@ sub new {
                 $self->DEBUG("Registered route $pkg_routes->[$i]");
             }
             push(@routes,@$pkg_routes);
+
+            my $pkg_aliases = *$a{HASH};
+            foreach my $al (keys(%$pkg_aliases)) {
+                $self->DEBUG("aliased route $al to $pkg_aliases->{$al}");
+            }
+            @aliases{keys(%$pkg_aliases)} = values(%$pkg_aliases);
         } else {
             die "Could not load $route!\n$@\n";
         }
@@ -249,7 +257,8 @@ sub new {
     $self->{indices} //=[];
     $self->{indices} = [@{$self->{indices}},qw{index.html index.htm index.cgi}];
 
-    $self->{routes} = \@routes;
+    $self->{routes}  = \@routes;
+    $self->{aliases} = \%aliases;
     return $self;
 }
 
@@ -528,6 +537,10 @@ sub _app {
 		referer  => $referer,
 	};
 
+    # Support aliased paths
+    my $aliases = $self->{aliases};
+    $path = $aliases->{$path} if exists $aliases->{$path};
+
     # Check eTags.  If we don't know about it, just assume it's good and lazily fill the cache
     # XXX yes, this allows cache poisoning...but only for logged in users!
 	# This also needs to be IN DB so that we coordinate properly across forks
@@ -581,7 +594,7 @@ sub _app {
         $route_actual = $r->[$matched+1] if defined($matched);
     }
 
-    return $self->route( $route_actual, $env, $fullpath, $path, $start, $last_fetch, $deflate ) if $route_actual;
+    return $self->route( $route_actual, $env, $fullpath, $path, $start, $last_fetch, $deflate, $domain, $port ) if $route_actual;
 
     # Do a case insensitive match, because osx and windows
     my $file_possible = $self->mangle_filename("www/$path");
@@ -646,7 +659,7 @@ sub appears_executable {
 
 # Handle actual routes
 sub route {
-    my ($self, $route, $env, $fullpath, $path, $start, $last_fetch, $deflate ) = @_;
+    my ($self, $route, $env, $fullpath, $path, $start, $last_fetch, $deflate, $domain, $port ) = @_;
 
     $self->DEBUG('Executing route '.$route->{pattern});
 
@@ -663,6 +676,7 @@ sub route {
     }
 
     # Provide static renders if available.
+    # TODO allow routes to signal back up to us if they want to go static.
     my $streaming = $env->{'psgi.streaming'};
     return $self->static( $fullpath, "$fullpath.z", $start, $streaming ) if -f "statics/$fullpath.z" && $deflate;
     return $self->static( $fullpath, $fullpath,     $start, $streaming ) if -f "statics/$fullpath";
@@ -681,6 +695,21 @@ sub route {
     # Put things to tv_interval in here for Server-Timing
     $query->{fullpath}     = $fullpath;
     $query->{method}       = $route->{method};
+    $query->{route}        = $path;
+    $query->{cookies}      = $env->{HTTP_COOKIE};
+    $query->{dnt}          = $env->{HTTP_DNT};
+    $query->{nosellinfo}   = $env->{HTTP_SEC_GPC};
+    $query->{port}         = $port;
+    $query->{scheme}       = $env->{'psgi.url_scheme'} // 'http';
+    $query->{method}       = $env->{REQUEST_METHOD};
+    $query->{lang}         = $env->{HTTP_ACCEPT_LANGUAGE};
+    $query->{accept}       = $env->{HTTP_ACCEPT};
+    $query->{has_query}    = !!$env->{QUERY_STRING};
+    $query->{domain}       = $domain;
+    $query->{dispatcher}   = $route;
+    $query->{ip}           = $cur_query->{ip};
+    $query->{ua}           = $cur_query->{ua};
+    $query->{referer}      = $cur_query->{referer};
 
     # This allows for better error handlers if we die in the route.
     $cur_query = $query;
