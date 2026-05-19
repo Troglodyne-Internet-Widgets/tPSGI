@@ -89,6 +89,8 @@ my $ct = 'Content-type';
 #memoize
 my $rq;
 
+my $generic_handler;
+
 sub request_id {
     my ( $self, $regenerate ) = @_;
     return $self->{uuid} if $self->{uuid} && !$regenerate;
@@ -252,6 +254,9 @@ sub new {
                 $self->DEBUG("aliased route $al to $pkg_aliases->{$al}");
             }
             @aliases{ keys(%$pkg_aliases) } = values(%$pkg_aliases);
+
+			# First-come first-served error template overrides
+			$generic_handler = "$package\:\:generic_route";
         }
         else {
             die "Could not load $route!\n$@\n";
@@ -426,7 +431,15 @@ sub _range {
 }
 
 sub _generic {
-    my ( $type, $code ) = @_;
+    my ( $type, $code, $query ) = @_;
+
+	if ($generic_handler) {
+		my $rname = "/$code";
+		my $title = $type;
+		no strict 'refs';
+		return $generic_handler->( $rname, $code, $title, $query);
+	}
+
     $type .= Carp::longmess() if $debug;
     return [ $code, [ $ct => $content_types{html} ], ["$type"] ];
 }
