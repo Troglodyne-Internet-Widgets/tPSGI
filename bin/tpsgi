@@ -46,8 +46,6 @@ sub main {
 }
 
 our $app = sub {
-    $options{verbose} = 1;
-
     # Change your dir into whatever basedir you need to be in
     chdir($options{'basedir'}) or warn "Can't chdir into $options{'basedir'}: $!";
 

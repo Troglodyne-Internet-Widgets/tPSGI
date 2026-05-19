@@ -592,6 +592,11 @@ sub _app {
         referer  => $referer,
     };
 
+    # Disallow any paths that are naughty - this appears to be done by starman automatically.
+	#if ( index($path, '..') != -1 ) {
+	#	return $self->forbidden($cur_query);
+	#}
+
     # Support aliased paths
     my $aliases = $self->{aliases};
     $path = $aliases->{$path} if exists $aliases->{$path};
@@ -734,11 +739,7 @@ sub route {
         $callback = $route->{callbacks}{$content_type};
     }
 
-    # Provide static renders if available.
-    # TODO allow routes to signal back up to us if they want to go static.
     my $streaming = $env->{'psgi.streaming'};
-    return $self->static( $fullpath, "$fullpath.z", $start, $streaming ) if -f "statics/$fullpath.z" && $deflate;
-    return $self->static( $fullpath, $fullpath,     $start, $streaming ) if -f "statics/$fullpath";
 
     # Build the query data for passing to a route.
     # GET, POST, URI captures, then explicit data overrides.
@@ -1155,6 +1156,66 @@ sub _restart_parent {
     }
     $parent //= getppid;
     kill 'HUP', $parent;
+}
+
+=head2 save_render($path, $extension, $body)
+
+Save a static render of the page.
+Good to queue after closing stdout.
+
+Passed file extension slapped on the end of the path.
+You can then serve them as statics with an appropriately done try_files block in nginx.
+
+=cut
+
+# fixup matrix
+my %fixup = (
+	text => 'txt',
+	blob => 'bin',
+);
+
+sub save_render {
+	my ($self, $path, $extension, $body) = @_;
+
+	return unless $path && $extension;
+
+	# Fixup the extension if needed.
+	$extension = $fixup{$extension} if exists $fixup{$extension};
+
+	my $path_fixed = $path;
+	$path_fixed =~ s/\.\Q$extension\E$//;
+	$path_fixed = "$path_fixed.$extension";
+
+    Path::Tiny::path( "www/static/" . dirname( $path_fixed ) )->mkpath;
+    my $file = "www/static/$path_fixed";
+
+    my $verb = -f $file ? 'Overwrite' : 'Write';
+	$self->INFO("$verb $path as static/$path_fixed");
+
+    open( my $fh, '>', $file ) or die "Could not open $file for writing";
+    print $fh $body;
+    close $fh;
+}
+
+sub invalidate_render {
+	my ($self, $path, $extension) = @_;
+
+	return unless $path && $extension;
+
+	# Fixup the extension if needed.
+	$extension = $fixup{$extension} if exists $fixup{$extension};
+
+	my $path_fixed = $path;
+	$path_fixed =~ s/\.\Q$extension\E$//;
+	$path_fixed = "$path_fixed.$extension";
+
+    Path::Tiny::path( "www/static/" . dirname( $path_fixed ) )->mkpath;
+    my $file = "www/static/$path_fixed";
+
+	return unless -f $file;
+
+	$self->INFO("Delete $path as $file");
+	unlink "$file";
 }
 
 1;
