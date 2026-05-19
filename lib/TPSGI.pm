@@ -33,6 +33,7 @@ use DateTime::Format::HTTP();
 use URL::Encode();
 use File::Touch;
 use File::Path;
+use File::Copy;
 use Cwd            qw{abs_path};
 use File::Basename qw{dirname basename};
 use Log::Dispatch;
@@ -151,7 +152,9 @@ sub _log {
     my $tstamp = POSIX::strftime "%Y-%m-%dT%H:%M:%SZ", gmtime;
     my $uuid   = $self->request_id();
 
-    return "[Worker $$] {Request $uuid} $tstamp : $self->{ip} $msg\n";
+	my $udata = $self->{user} ? "[$self->{user}]" : "[nobody]";
+
+    return "[Worker $$] {Request $uuid} $udata $tstamp : $self->{ip} $msg\n";
 }
 
 # Logger short cuts
@@ -358,6 +361,21 @@ sub serve {
         IO::Compress::Gzip::gzip( $fh => \$dfh );
         print $IO::Compress::Gzip::GzipError if $IO::Compress::Gzip::GzipError;
         push( @headers, "Content-Length" => length($dfh) );
+
+		# Copy to the statics if it's not already there
+		die "incorrect path $path, this is a bug" if $path =~ m/^http/;
+		my $static_path = $path;
+		$static_path =~ s|^[/]*www/||;
+		$static_path = "www/static/$static_path";
+		if (!-f $static_path) {
+			my $target_dir = dirname($static_path);
+			$self->INFO("Copying $path to $static_path");
+			if (! -d $target_dir) {
+				File::Path::make_path($target_dir) or die "Could not make dir $target_dir";
+			}
+			File::Copy::copy($path, $static_path) or die "Could not copy $path to $static_path";
+			# TODO figure out cache invalidation, I guess check mtime/hash
+		}
 
         $self->INFO("GET 200 $fullpath");
 
