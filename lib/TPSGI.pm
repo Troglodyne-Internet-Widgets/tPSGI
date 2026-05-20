@@ -1198,6 +1198,11 @@ sub save_render {
 
     return unless $path && $extension;
 
+    # If this is an index, let's make it so
+    if ($path =~ m|/$|) {
+        $path = $path.'index';
+    }
+
     # Fixup the extension if needed.
     $extension = $fixup{$extension} if exists $fixup{$extension};
 
