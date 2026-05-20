@@ -152,7 +152,7 @@ sub _log {
     my $tstamp = POSIX::strftime "%Y-%m-%dT%H:%M:%SZ", gmtime;
     my $uuid   = $self->request_id();
 
-	my $udata = $self->{user} ? "[$self->{user}]" : "[nobody]";
+    my $udata = $self->{user} ? "[$self->{user}]" : "[nobody]";
 
     return "[Worker $$] {Request $uuid} $udata $tstamp : $self->{ip} $msg\n";
 }
@@ -221,6 +221,11 @@ sub new {
     # Refuse to run as wrong user, all config will be borked otherwise
     my $pname = getpwuid($>);
     die "Must run as configured user (got: $pname, want: $options{user})!" unless $pname eq ( $options{user} // '' );
+    die "Must set http_user in options"                                    unless $options{http_user};
+
+    my $gid = getgrnam( $options{http_user} );
+    die "No such user $options{http_user}" unless $gid;
+    $options{gid} = $gid;
 
     my $self = bless( \%options, $class );
     $self->{ip} = '0.0.0.0';
@@ -258,8 +263,8 @@ sub new {
             }
             @aliases{ keys(%$pkg_aliases) } = values(%$pkg_aliases);
 
-			# First-come first-served error template overrides
-			$generic_handler = "$package\:\:generic_route";
+            # First-come first-served error template overrides
+            $generic_handler = "$package\:\:generic_route";
         }
         else {
             die "Could not load $route!\n$@\n";
@@ -362,20 +367,25 @@ sub serve {
         print $IO::Compress::Gzip::GzipError if $IO::Compress::Gzip::GzipError;
         push( @headers, "Content-Length" => length($dfh) );
 
-		# Copy to the statics if it's not already there
-		die "incorrect path $path, this is a bug" if $path =~ m/^http/;
-		my $static_path = $path;
-		$static_path =~ s|^[/]*www/||;
-		$static_path = "www/static/$static_path";
-		if (!-f $static_path) {
-			my $target_dir = dirname($static_path);
-			$self->INFO("Copying $path to $static_path");
-			if (! -d $target_dir) {
-				File::Path::make_path($target_dir) or die "Could not make dir $target_dir";
-			}
-			File::Copy::copy($path, $static_path) or die "Could not copy $path to $static_path";
-			# TODO figure out cache invalidation, I guess check mtime/hash
-		}
+        # Copy to the statics if it's not already there
+        die "incorrect path $path, this is a bug" if $path =~ m/^http/;
+        my $static_path = $path;
+        $static_path =~ s|^[/]*www/||;
+        $static_path = "www/static/$static_path";
+        if ( !-f $static_path ) {
+
+            my $target_dir = dirname($static_path);
+            $self->INFO("Copying $path to $static_path");
+
+            if ( !-d $target_dir ) {
+                File::Path::make_path( $target_dir, { user => $<, group => $self->{gid}, chmod => 0755 } ) or die "Could not make dir $target_dir";
+            }
+            File::Copy::copy( $path, $static_path ) or die "Could not copy $path to $static_path";
+            chown( $<, $self->{gid}, $static_path );
+            chmod( 0755, $static_path );
+
+            # TODO figure out cache invalidation, I guess check mtime/hash
+        }
 
         $self->INFO("GET 200 $fullpath");
 
@@ -451,12 +461,12 @@ sub _range {
 sub _generic {
     my ( $type, $code, $query ) = @_;
 
-	if ($generic_handler) {
-		my $rname = "/$code";
-		my $title = $type;
-		no strict 'refs';
-		return $generic_handler->( $rname, $code, $title, $query);
-	}
+    if ($generic_handler) {
+        my $rname = "/$code";
+        my $title = $type;
+        no strict 'refs';
+        return $generic_handler->( $rname, $code, $title, $query );
+    }
 
     $type .= Carp::longmess() if $debug;
     return [ $code, [ $ct => $content_types{html} ], ["$type"] ];
@@ -567,8 +577,8 @@ sub _app {
     my $start = [gettimeofday];
     $cur_query = {};
 
-    # Don't make things group read/write
-    umask 0007;
+    # Don't make things world/group write
+    umask 0022;
 
     my $env = shift;
     $self->{filehandle} = $env->{'psgix.io'} // *STDOUT;
@@ -582,8 +592,9 @@ sub _app {
     # Various stuff important for logging requests
     my $domain = $env->{HTTP_X_FORWARDED_HOST} || $env->{HTTP_HOST} // eval { Sys::Hostname::hostname() };
     my $path   = $env->{PATH_INFO};
-	# de-pooplicate the path
-	$path =~ s|//|/|g;
+
+    # de-pooplicate the path
+    $path =~ s|//|/|g;
 
     my $port   = $env->{HTTP_X_FORWARDED_PORT} // $env->{HTTP_PORT};
     my $pport  = defined $port ? ":$port" : "";
@@ -611,9 +622,9 @@ sub _app {
     };
 
     # Disallow any paths that are naughty - this appears to be done by starman automatically.
-	#if ( index($path, '..') != -1 ) {
-	#	return $self->forbidden($cur_query);
-	#}
+    #if ( index($path, '..') != -1 ) {
+    #	return $self->forbidden($cur_query);
+    #}
 
     # Support aliased paths
     my $aliases = $self->{aliases};
@@ -763,8 +774,8 @@ sub route {
     # GET, POST, URI captures, then explicit data overrides.
     my $query = $self->extract_query( $path, $route, $env );
 
-	# We failed validation if $query isn't a hashref.
-	return $query if ref $query eq 'ARRAY';
+    # We failed validation if $query isn't a hashref.
+    return $query if ref $query eq 'ARRAY';
 
     # allow this stuff to survive down to the end of some routes
     $query->{last_fetched} = $last_fetch;
@@ -851,7 +862,7 @@ sub extract_query {
     }
 
     # Now that we've parsed the query and know where we want to go,
-	# we should (optionally) murder everything the route does not explicitly want, and validate what it does
+    # we should (optionally) murder everything the route does not explicitly want, and validate what it does
     my $parameters = $route->{parameters};
     if ($parameters) {
         die "invalid route definition for $path: bad parameters" unless ref $parameters eq 'HASH';
@@ -1089,6 +1100,7 @@ sub get_config {
         user       => '',
         binds      => [],
         basedir    => $ENV{'HOME'},
+        http_user  => '',
     );
     my $config_file = "$ENV{HOME}/.tpsgi.ini";
     if ( -f $config_file ) {
@@ -1188,52 +1200,56 @@ You can then serve them as statics with an appropriately done try_files block in
 
 # fixup matrix
 my %fixup = (
-	text => 'txt',
-	blob => 'bin',
+    text => 'txt',
+    blob => 'bin',
 );
 
 sub save_render {
-	my ($self, $path, $extension, $body) = @_;
+    my ( $self, $path, $extension, $body ) = @_;
 
-	return unless $path && $extension;
+    return unless $path && $extension;
 
-	# Fixup the extension if needed.
-	$extension = $fixup{$extension} if exists $fixup{$extension};
+    # Fixup the extension if needed.
+    $extension = $fixup{$extension} if exists $fixup{$extension};
 
-	my $path_fixed = $path;
-	$path_fixed =~ s/\.\Q$extension\E$//;
-	$path_fixed = "$path_fixed.$extension";
+    my $path_fixed = $path;
+    $path_fixed =~ s/\.\Q$extension\E$//;
+    $path_fixed = "$path_fixed.$extension";
 
-    Path::Tiny::path( "www/static/" . dirname( $path_fixed ) )->mkpath;
+    my $path2file = "www/static/" . dirname($path_fixed);
+    if ( !-d $path2file ) {
+        File::Path::make_path( $path2file, { user => $<, group => $self->{gid}, chmod => 0755 } ) or die "Could not create directory $path2file";
+    }
     my $file = "www/static/$path_fixed";
 
     my $verb = -f $file ? 'Overwrite' : 'Write';
-	$self->INFO("$verb $path as static/$path_fixed");
+    $self->INFO("$verb $path as static/$path_fixed");
 
     open( my $fh, '>', $file ) or die "Could not open $file for writing";
     print $fh $body;
     close $fh;
+    chmod( 0755, $file );
+    chown( $<, $self->{gid}, $file );
 }
 
 sub invalidate_render {
-	my ($self, $path, $extension) = @_;
+    my ( $self, $path, $extension ) = @_;
 
-	return unless $path && $extension;
+    return unless $path && $extension;
 
-	# Fixup the extension if needed.
-	$extension = $fixup{$extension} if exists $fixup{$extension};
+    # Fixup the extension if needed.
+    $extension = $fixup{$extension} if exists $fixup{$extension};
 
-	my $path_fixed = $path;
-	$path_fixed =~ s/\.\Q$extension\E$//;
-	$path_fixed = "$path_fixed.$extension";
+    my $path_fixed = $path;
+    $path_fixed =~ s/\.\Q$extension\E$//;
+    $path_fixed = "$path_fixed.$extension";
 
-    Path::Tiny::path( "www/static/" . dirname( $path_fixed ) )->mkpath;
     my $file = "www/static/$path_fixed";
 
-	return unless -f $file;
+    return unless -f $file;
 
-	$self->INFO("Delete $path as $file");
-	unlink "$file";
+    $self->INFO("Delete $path as $file");
+    unlink "$file";
 }
 
 1;
