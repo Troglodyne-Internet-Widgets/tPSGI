@@ -1,6 +1,6 @@
 package TPSGI;
 
-# Abstract: Abstraction layer around starman to become a general purpose HTTP server
+# Abstract: Abstraction layer around starman to become a general purpose HTTP server & static renderer.
 
 use strict;
 use warnings;
@@ -41,16 +41,6 @@ use Log::Dispatch::Screen;
 use Log::Dispatch::FileRotate;
 
 use Config::Simple;
-
-# Generally we want the users to be able to DB::enable_profile() and DB::disable_profile() as they choose.
-BEGIN {
-    # If we have manually set the NYTPROF var, use it and don't try to control
-    # When to stop or start it.
-    my $basedir = Cwd::abs_path("$FindBin::Bin");
-    $ENV{NYTPROF} ||= "sigexit=1:savesrc=0:start=no:file=$basedir/prof/nytprof.out";
-    require Devel::NYTProf;
-    mkdir "$basedir/prof";
-}
 
 # We have a DEBUG var which is plus ultra for extra sensitive stuff beyond just passing verbose
 my $debug = $ENV{TPSGI_DEBUG};
@@ -222,6 +212,7 @@ sub new {
     my $pname = getpwuid($>);
     die "Must run as configured user (got: $pname, want: $options{user})!" unless $pname eq ( $options{user} // '' );
     die "Must set http_user in options"                                    unless $options{http_user};
+	die "Must set tpsgi_dir in options"									   unless $options{tpsgi_dir};
 
     my $gid = getgrnam( $options{http_user} );
     die "No such user $options{http_user}" unless $gid;
@@ -368,10 +359,9 @@ sub serve {
         push( @headers, "Content-Length" => length($dfh) );
 
         # Copy to the statics if it's not already there
-        die "incorrect path $path, this is a bug" if $path =~ m/^http/;
         my $static_path = $path;
         $static_path =~ s|^[/]*www/||;
-        $static_path = "www/static/$static_path";
+        $static_path = "$self->{tpsgi_dir}/www/static/$static_path";
         if ( !-f $static_path ) {
 
             my $target_dir = dirname($static_path);
@@ -577,10 +567,7 @@ sub _app {
     my $start = [gettimeofday];
     $cur_query = {};
 
-    # Don't make things world/group write
-    umask 0022;
-
-    my $env = shift;
+	my $env = shift;
     $self->{filehandle} = $env->{'psgix.io'} // *STDOUT;
 
     # Setup the unique ID for the request
@@ -1101,6 +1088,7 @@ sub get_config {
         binds      => [],
         basedir    => $ENV{'HOME'},
         http_user  => '',
+		tpsgi_dir  => Cwd::getcwd(),
     );
     my $config_file = "$ENV{HOME}/.tpsgi.ini";
     if ( -f $config_file ) {
@@ -1216,11 +1204,11 @@ sub save_render {
     $path_fixed =~ s/\.\Q$extension\E$//;
     $path_fixed = "$path_fixed.$extension";
 
-    my $path2file = "www/static/" . dirname($path_fixed);
+    my $path2file = "$self->{tpsgi_dir}/www/static/" . dirname($path_fixed);
     if ( !-d $path2file ) {
         File::Path::make_path( $path2file, { user => $<, group => $self->{gid}, chmod => 0755 } ) or die "Could not create directory $path2file";
     }
-    my $file = "www/static/$path_fixed";
+    my $file = "$self->{tpsgi_dir}/www/static/$path_fixed";
 
     my $verb = -f $file ? 'Overwrite' : 'Write';
     $self->INFO("$verb $path as static/$path_fixed");
@@ -1231,6 +1219,12 @@ sub save_render {
     chmod( 0755, $file );
     chown( $<, $self->{gid}, $file );
 }
+
+=head2 invalidate_render($path, $extension)
+
+Remove an existing static render.
+
+=cut
 
 sub invalidate_render {
     my ( $self, $path, $extension ) = @_;
@@ -1244,7 +1238,7 @@ sub invalidate_render {
     $path_fixed =~ s/\.\Q$extension\E$//;
     $path_fixed = "$path_fixed.$extension";
 
-    my $file = "www/static/$path_fixed";
+    my $file = "$self->{tpsgi_dir}/www/static/$path_fixed";
 
     return unless -f $file;
 

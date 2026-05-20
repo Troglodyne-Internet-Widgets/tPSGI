@@ -2,11 +2,12 @@
 
 #pacakge bin::tpsgi;
 
-#ABSTRACT: PSGI application which simplifies migrating legacy/cgi applications to PSGI
+#ABSTRACT: PSGI application which simplifies migrating legacy/cgi applications to PSGI, but also has advanced features for normal psgi apps
 
 use strict;
 use warnings;
 
+use Cwd;
 use FindBin::libs;
 use File::Basename qw{dirname};
 
@@ -27,7 +28,7 @@ tpsgi obeys a config file, ~/.tpsgi.ini which is in Config::Simple (key=value) f
     loggers     # Logger module(s), separate with comma
     auth        # Authentication module
     domain      # Domain name of the application, used by things like service files
-    basedir     # Directory you want to base this out of (defaults to HOME).
+    basedir     # Directory you want to chdir into on startup (defaults to HOME).
     user        # Who to run as
     http_user   # Who's proxying this application (used for statics)
 
@@ -43,12 +44,21 @@ sub main {
         my $libdir = dirname($route);
         push(@INC, $libdir);
     }
+
     return %options;
 }
 
 our $app = sub {
+    umask 0022;
+
     # Change your dir into whatever basedir you need to be in
-    chdir($options{'basedir'}) or warn "Can't chdir into $options{'basedir'}: $!";
+    chdir($options{'basedir'}) or die "Can't chdir into $options{'basedir'}: $!";
+
+    # If we have manually set the NYTPROF var, use it and don't try to control
+    # When to stop or start it.
+    $ENV{NYTPROF} ||= "sigexit=1:savesrc=0:start=no:file=$options{basedir}/prof/nytprof.out";
+    require Devel::NYTProf;
+    mkdir "$options{basedir}/prof";
 
     my $self = TPSGI->new(%options);
     return eval { $self->app(@_) } || do {
