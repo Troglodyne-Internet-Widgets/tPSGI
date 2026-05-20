@@ -23,16 +23,17 @@ tpsgi obeys a config file, ~/.tpsgi.ini which is in Config::Simple (key=value) f
 
     verbose     # Whether to print all log messages or not
     custom_log  # Custom location for default (rotated) log
-    routers     # Router module(s), separate with comma
+    routers     # Router module(s), separate with comma.  Relative to TPSGI install dir.
     indices     # Dirindex files.  In addition to index.html, index.htm, index.cgi
     loggers     # Logger module(s), separate with comma
     auth        # Authentication module
     domain      # Domain name of the application, used by things like service files
-    basedir     # Directory you want to chdir into on startup (defaults to HOME).
+    basedir     # Directory you want to chdir into on startup. Relative to TPSGI install dir.  Default '.'
     user        # Who to run as
     http_user   # Who's proxying this application (used for statics)
 
 The idea is that this application is going to be run in a chroot with the user's homedir being the application dir.
+This is why the various paths asked for are relative to the tPSGI install dir.
 
 =cut
 
@@ -52,7 +53,7 @@ our $app = sub {
     umask 0022;
 
     # Change your dir into whatever basedir you need to be in
-    chdir($options{'basedir'}) or die "Can't chdir into $options{'basedir'}: $!";
+    chdir("$options{tpsgi_dir}/$options{basedir}") or die "Can't chdir into $options{tpsgi_dir}/$options{'basedir'}: $!";
 
     # If we have manually set the NYTPROF var, use it and don't try to control
     # When to stop or start it.

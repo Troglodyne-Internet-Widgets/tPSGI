@@ -228,19 +228,20 @@ sub new {
     no strict 'refs';
     foreach my $route ( @{ $self->{routers} } ) {
 
-        die "No such routing module $route" unless -f $route;
+        die "No such routing module $route" unless -f "$options{tpsgi_dir}/$route";
 
         # The router needs to exist and have nonzero numbers of routes.
         my ($package) = basename($route) =~ m/(\S+)\.pm$/;
         my $r         = "$package\:\:routes";
         my $a         = "$package\:\:aliases";
 
-        my $libdir = dirname($route);
+		# It also should be a top-level namespace, not somewhere deep down. KISS.
+        my $libdir = dirname("$options{tpsgi_dir}/$route");
         push( @INC, $libdir );
 
         local $@;
-        $self->DEBUG("require $route");
-        my $success = eval { require $route; 1; };
+        $self->DEBUG("require $options{tpsgi_dir}/$route");
+        my $success = eval { require "$options{tpsgi_dir}/$route"; 1; };
         if ($success) {
             my $pkg_routes = *$r{ARRAY};
             for ( my $i = 0; $i < @$pkg_routes; $i += 2 ) {
@@ -1086,7 +1087,7 @@ sub get_config {
         domain     => '',
         user       => '',
         binds      => [],
-        basedir    => $ENV{'HOME'},
+        basedir    => '.',
         http_user  => '',
 		tpsgi_dir  => Cwd::getcwd(),
     );
