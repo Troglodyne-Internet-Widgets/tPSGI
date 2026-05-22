@@ -579,7 +579,7 @@ sub _app {
 
     # Various stuff important for logging requests
     my $domain = $env->{HTTP_X_FORWARDED_HOST} || $env->{HTTP_HOST} // eval { Sys::Hostname::hostname() };
-    my $path   = $env->{PATH_INFO};
+    my $path   = $env->{PATH_INFO} || '/';
 
     # de-pooplicate the path
     $path =~ s|//|/|g;
@@ -656,6 +656,7 @@ sub _app {
     # If we have an actual route, just use it.
     my $r           = $self->routes;
     my $route_index = List::Util::first { ( $r->[$_] // '' ) eq $path } 0 .. scalar(@$r);
+
     my $route_actual;
     $route_actual = $r->[ $route_index + 1 ] if defined($route_index);
 
