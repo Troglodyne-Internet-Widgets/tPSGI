@@ -487,6 +487,19 @@ sub see_also {
     return [ 303, [ "Location" => $to, "Content-Length" => 0 ], [''] ];
 }
 
+=head2 ok
+
+Return a generic HTTP 200 OK
+
+=cut
+
+sub ok {
+    my ( $self, $query, $body ) = @_;
+    $self->INFO("$query->{method} 200 $query->{fullpath}");
+    $body //= 'Ok';
+    return _generic( $body, 200 );
+}
+
 =head2 notfound, forbidden, badrequest, toolong, error
 
 If you need to return these HTTP errors, return these within a route:
