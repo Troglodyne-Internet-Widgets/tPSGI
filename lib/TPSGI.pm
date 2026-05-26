@@ -1233,7 +1233,7 @@ sub save_render {
 
 =head2 invalidate_render($path, $extension)
 
-Remove an existing static render.
+Remove an existing static render of a path.
 
 =cut
 
@@ -1252,9 +1252,33 @@ sub invalidate_render {
     my $file = "$self->{tpsgi_dir}/www/static/$path_fixed";
 
     return unless -f $file;
+    $self->_invalidate($file);
+}
 
-    $self->INFO("Delete $path as $file");
+sub _invalidate {
+    my ($self, $file) = @_;
+    $self->INFO("Delete $file");
     unlink "$file";
+}
+
+=head2 invalidate_renders($extension)
+
+Remove all existing static renders with the provided extension.
+Useful when it's not easy to figure out what to re-render due to including templates in other templates, etc.
+
+=cut
+
+sub invalidate_renders {
+    my ($self, $extension) = @_;
+    File::Find::find( {
+        wanted => sub {
+            my $object = $_;
+            $self->_invalidate($object) if (-f $object && $object =~ m/\.\Q$extension\E$/);
+        },
+        no_chdir => 1,
+        bydepth => 1,
+    },
+    "$self->{tpsgi_dir}/www/static/");
 }
 
 my @wds;
