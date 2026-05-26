@@ -56,9 +56,9 @@ our $app = sub {
 
     # If we have manually set the NYTPROF var, use it and don't try to control
     # When to stop or start it.
-    $ENV{NYTPROF} ||= "sigexit=1:savesrc=0:start=no:file=$options{basedir}/prof/nytprof.out";
+    $ENV{NYTPROF} ||= "sigexit=1:savesrc=0:start=no:file=$options{tpsgi_dir}/prof/nytprof.out";
     require Devel::NYTProf;
-    mkdir "$options{basedir}/prof";
+    mkdir "$options{tpsgi_dir}/prof";
 
     my $self = TPSGI->new(%options);
     return eval { $self->app(@_) } || do {
