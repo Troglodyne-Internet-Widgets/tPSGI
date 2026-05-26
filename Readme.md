@@ -19,13 +19,23 @@ The best way to do that is to expect raw PSGI to be output.
 
 Obeys ~/.tpsgi.ini -- this is what will control all the custom aspects mentioned below:
 
-    domain:    what domain name this site is
-    user:      what user will this run under
-    http_user: user of the HTTP server (usually www_data)
-    routers:   Where routing modules live
-    indices:   What files are acceptable to execute as directory indexes
+    verbose     : Whether to print all log messages or not
+    custom_log  : Custom location for default (rotated) log
+    routers     : Router module(s), separate with comma.  Relative to TPSGI install dir.
+    indices     : Dirindex files.  In addition to index.html, index.htm, index.cgi
+    loggers     : Logger module(s), separate with comma
+    auth        : Authentication module
+    domain      : Domain name of the application, used by things like service files
+    basedir     : Directory you want to chdir into on startup. Relative to TPSGI install dir.  Default '.'
+    user        : Who to run as
+    http_user   : Who's proxying this application (used for statics)
+    autoreload  : Whether or not to automatically reload the application when library files change. Default 0.
 
 You can run bin/tpsgi-config to get any config value needed by scripts.
+
+We wrap starman with a custom script, `bin/tarbaby` that implements Plack::Loader::Reload far less dangerously.
+It only reloads the code relevant to tPSGI and your application itself.
+All the CPAN deps should be updated out-of-band and the service manually restarted, as this is far more fraught.
 
 ## Custom routing
 
