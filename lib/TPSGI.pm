@@ -371,9 +371,8 @@ sub serve {
             if ( !-d $target_dir ) {
                 File::Path::make_path( $target_dir, { user => $<, group => $self->{gid}, chmod => 0755 } ) or die "Could not make dir $target_dir";
             }
-            File::Copy::copy( $path, $static_path ) or die "Could not copy $path to $static_path";
-            chown( $<, $self->{gid}, $static_path );
-            chmod( 0755, $static_path );
+            # hardlink to save disk space
+            link $path, $static_path;
 
             # TODO figure out cache invalidation, I guess check mtime/hash
         }
