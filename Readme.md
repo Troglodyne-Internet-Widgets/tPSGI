@@ -139,3 +139,6 @@ In general the operation is like so:
 1. nginx (or whatever) looks for a sock file owned $USER:$WEB\_GROUP, and reverse proxies to this
 2. tpsgi is actively listening on this sock file.
 
+Generally you'll just run bin/build\_service and then systemctl start $domain.
+It's configured to start as root, then drop privs thanks to Net::Server's capabilities inherited in starman.
+

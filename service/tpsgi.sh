@@ -4,6 +4,11 @@ USERNAME=$(bin/tpsgi-config --user)
 [[ -z $USERNAME ]] && USERNAME=$USER
 echo "tPSGI running as user $USERNAME"
 
+EGID=$(id -nu)
+GROUP=$(bin/tpsgi-config --http_user)
+[[ -z $GROUP ]] && GROUP=$EGID
+echo "tPSGI running with EGID $GROUP";
+
 [[ -e run/tpsgi.pid ]] && sudo pkill -F run/tpsgi.pid
 
 # Bind the various dirs we need for chroot to work
@@ -25,7 +30,7 @@ for bind in "${BIND_DIRS[@]}"; do
 done
 
 # We should obey the PATH set by this user, whose homedir is right here, ideally.
-bin/tpsgi --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --daemonize --pid run/tpsgi.pid --chroot $(pwd)
+bin/tpsgi --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --group "$GROUP" --daemonize --pid run/tpsgi.pid --chroot $(pwd)
 
 if [ $? -ne 0 ]
 then
