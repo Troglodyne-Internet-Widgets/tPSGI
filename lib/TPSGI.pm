@@ -883,7 +883,8 @@ sub extract_query {
         # Smack down passing of unnecessary fields
         foreach my $field ( keys(%$query) ) {
             next if List::Util::any { $field eq $_ } @known_params;
-            next if List::Util::any { $field eq $_ } qw{start route streaming method fullpath};
+            #XXX I am unsure as to what injects 'body' sometimes.
+            next if List::Util::any { $field eq $_ } qw{start route streaming method fullpath body};
             $self->DEBUG("Rejected $path for query param $field");
             return $self->badrequest($query);
         }
