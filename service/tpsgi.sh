@@ -30,7 +30,7 @@ for bind in "${BIND_DIRS[@]}"; do
 done
 
 # We should obey the PATH set by this user, whose homedir is right here, ideally.
-bin/tpsgi --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --group "$GROUP" --daemonize --pid run/tpsgi.pid --chroot $(pwd)
+bin/tarbaby --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --group "$GROUP" --daemonize --pid run/tpsgi.pid --chroot $(pwd) bin/tpsgi
 
 if [ $? -ne 0 ]
 then

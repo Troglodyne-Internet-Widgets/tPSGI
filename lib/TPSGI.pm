@@ -33,7 +33,9 @@ use URL::Encode();
 use File::Touch;
 use File::Path;
 use File::Copy;
+use File::Find;
 use Cwd            qw{abs_path};
+
 use File::Basename qw{dirname basename};
 use Log::Dispatch;
 use Log::Dispatch::Screen;
@@ -224,9 +226,6 @@ sub new {
     my @routes;
     my %aliases;
 
-    # Setup inotify watchers to know if we need to reload the application after this request.
-    $self->_watch_for_changes("$options{tpsgi_dir}/lib");
-
     # XXX TODO make these routes able to be fully qualified namespaces (::)!
     no strict 'refs';
     foreach my $route ( @{ $self->{routers} } ) {
@@ -241,8 +240,6 @@ sub new {
 		# It also should be a top-level namespace, not somewhere deep down. KISS.
         my $libdir = dirname("$options{tpsgi_dir}/$route");
         push( @INC, $libdir );
-
-        $self->_watch_for_changes($libdir);
 
         local $@;
         $self->DEBUG("require $options{tpsgi_dir}/$route");
@@ -1260,24 +1257,34 @@ sub invalidate_render {
     unlink "$file";
 }
 
-sub _watch_for_changes {
-    my ($self, @dirs) = @_;
+my @wds;
+my $inotify;
+sub watch_for_changes {
+    my (@dirs) = @_;
 
-    $self->{wds} //= [];
+    # No point watching again if we already are watching
+    return if @wds;
 
-    $self->{inf} //= Linux::Perl::inotify->new(flags => [qw{NONBLOCK}]);
-    foreach my $directory (@dirs) {
-        # Recursive scan for directories and setting up inotifies
-        push(@dirs, _readdir( $directory ));
-        $self->INFO( "Watching $directory for changes\n" );
-        push(@{$self->{wds}}, $self->{inf}->add( path => $directory, events => [qw{CREATE MODIFY}] ));
+    $inotify //= Linux::Perl::inotify->new(flags => [qw{NONBLOCK}]);
+    my @to_watch =_readdir( @dirs );
+
+    foreach my $f2watch (@to_watch) {
+        print "Watching $f2watch for changes\n";
+        push(@wds, $inotify->add( path => $f2watch, events => [qw{CREATE MODIFY DELETE MOVE}] ));
     }
 }
+
+=head2 restart_if_changes
+
+Restart tPSGI if any of the relevant libdir files change.
+Powers the autorestart feature.
+
+=cut
 
 sub restart_if_changes {
     my $self = shift;
 
-    my @result = $self->{inf}->read();
+    my @result = $inotify->read();
     my $had_changes = 0;
 
     foreach my $res (@result) {
@@ -1286,18 +1293,25 @@ sub restart_if_changes {
             last;
         }
     }
+    return 0 unless $had_changes ;
 
+    # We don't have to clean up the wds, that is handled in the destructor for Inotify
     $self->INFO("Relevant Change in libdirs detected, reloading\n");
-    foreach my $wd (@{$self->{wds}}) { $self->{inf}->remove($wd) }
     $self->signal_restart_parent();
     return 0;
 }
 
 sub _readdir {
-    my $dir = shift;
-    opendir(my $dh, $dir);
-    my @dirs = map { "$dir/$_" } grep { -d "$dir/$_" && !m/^\.+$/ } readdir($dh);
-    closedir($dh);
+    my @dirs = @_;
+    File::Find::find( {
+        wanted => sub {
+            my $object = $_;
+            push(@dirs, $object) if (-f $object && $object =~ m/\.pm$/);
+        },
+        no_chdir => 1,
+        bydepth => 1,
+    },
+    @dirs);
     return @dirs;
 }
 

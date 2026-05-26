@@ -1,0 +1,45 @@
+#!/usr/bin/env perl
+
+# Minor modifications to starman to support autoreload of code without Plack::Loader::Restarter.
+
+use strict;
+
+use FindBin::libs;
+use Plack::Runner;
+
+use File::Basename qw{dirname};
+use TPSGI;
+
+sub version {
+    require Starman;
+    print "Starman $Starman::VERSION\n";
+}
+
+# Setup the watcher for changes
+# This has to be setup at global server start rather than app start per worker.
+# This is preferable to using -R (Plack::Loader::Restarter, see notes in orig starman)
+my %options = TPSGI::get_config();
+my @dirs = ("$options{tpsgi_dir}/lib");
+foreach my $route (@{$options{routers}}) {
+    push(@dirs, dirname("$options{tpsgi_dir}/$route"));
+}
+TPSGI::watch_for_changes(@dirs);
+
+my $preload_app;
+require Getopt::Long;
+Getopt::Long::Configure("no_ignore_case", "no_auto_abbrev", "pass_through");
+Getopt::Long::GetOptions(
+    "preload-app"      => \$preload_app,
+);
+
+my @args = (server => 'Starman', env => 'deployment', version_cb => \&version);
+if (!$preload_app) {
+        push @args, 'loader' => 'Delayed';
+}
+my @argv = @ARGV;
+my $runner = Plack::Runner->new(@args);
+$runner->parse_options(@argv);
+
+$runner->set_options(argv => \@argv);
+$runner->run;
+

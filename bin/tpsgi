@@ -1,6 +1,4 @@
-#!/usr/bin/env starman
-
-#pacakge bin::tpsgi;
+#!bin/tarbaby
 
 #ABSTRACT: PSGI application which simplifies migrating legacy/cgi applications to PSGI, but also has advanced features for normal psgi apps
 
