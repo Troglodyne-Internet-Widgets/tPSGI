@@ -866,8 +866,7 @@ sub extract_query {
     # Now that we've parsed the query and know where we want to go,
     # we should (optionally) murder everything the route does not explicitly want, and validate what it does
     my $parameters = $route->{parameters};
-    if ($parameters) {
-        die "invalid route definition for $path: bad parameters" unless ref $parameters eq 'HASH';
+    if (ref $parameters eq 'HASH' && %$parameters) {
         my @known_params = keys(%$parameters);
         for my $param (@known_params) {
             die "Invalid route definition for $path: parameter $param must correspond to a validation CODEREF." unless ref $parameters->{$param} eq 'CODE';
@@ -880,12 +879,9 @@ sub extract_query {
             return $self->badrequest($query) unless $parameters->{$param}->( $query->{$param} );
         }
 
-        # Smack down passing of unnecessary fields
+        # Smack down passing of unnecessary fields; this catches bugs
         foreach my $field ( keys(%$query) ) {
             next if List::Util::any { $field eq $_ } @known_params;
-            #XXX I am unsure as to what injects 'body' sometimes.
-            next if List::Util::any { $field eq $_ } qw{start route streaming method fullpath body};
-            $self->DEBUG("Rejected $path for query param $field");
             return $self->badrequest($query);
         }
     }
