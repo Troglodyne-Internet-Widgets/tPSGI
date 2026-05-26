@@ -97,7 +97,7 @@ sub log {
     state $log;
     return $log if $log;
 
-    my $LOGNAME = abs_path('.') . '/log/tpsgi.log';
+    my $LOGNAME = "$self->{tpsgi_dir}/log/tpsgi.log";
     $LOGNAME = $self->{custom_log} if $self->{custom_log};
 
     my $LOGDIR = dirname($LOGNAME);
