@@ -9,7 +9,6 @@ use feature qw{state};
 
 use FindBin;
 
-use Cwd();
 use Carp::Always;
 
 use UUID();
@@ -39,6 +38,7 @@ use File::Basename qw{dirname basename};
 use Log::Dispatch;
 use Log::Dispatch::Screen;
 use Log::Dispatch::FileRotate;
+use Linux::Perl::inotify;
 
 use Config::Simple;
 
@@ -224,6 +224,9 @@ sub new {
     my @routes;
     my %aliases;
 
+    # Setup inotify watchers to know if we need to reload the application after this request.
+    $self->_watch_for_changes("$options{tpsgi_dir}/lib");
+
     # XXX TODO make these routes able to be fully qualified namespaces (::)!
     no strict 'refs';
     foreach my $route ( @{ $self->{routers} } ) {
@@ -238,6 +241,8 @@ sub new {
 		# It also should be a top-level namespace, not somewhere deep down. KISS.
         my $libdir = dirname("$options{tpsgi_dir}/$route");
         push( @INC, $libdir );
+
+        $self->_watch_for_changes($libdir);
 
         local $@;
         $self->DEBUG("require $options{tpsgi_dir}/$route");
@@ -275,6 +280,7 @@ sub new {
     $self->{routes}    = \@routes;
     $self->{aliases}   = \%aliases;
     $self->{callbacks} = [];
+
     return $self;
 }
 
@@ -811,6 +817,9 @@ sub route {
     # Setup the CGI vars they expect IF requested
     local %ENV = ( %ENV, CGI::Emulate::PSGI->emulate_environment($env) ) if $route->{env};
 
+    # Make this a truly 'dynamic' application if requested.
+    $self->restart_if_changes() if $self->{autoreload};
+
     {
         my $output = $callback->( $self, $query );
 
@@ -1100,6 +1109,7 @@ sub get_config {
         basedir    => '.',
         http_user  => '',
 		tpsgi_dir  => Cwd::getcwd(),
+        autoreload => 0,
     );
     my $config_file = "$ENV{HOME}/.tpsgi.ini";
     if ( -f $config_file ) {
@@ -1169,21 +1179,9 @@ sub signal_restart_parent {
     $self->add_post_close_callback( \&_restart_parent );
 }
 
-# Instruct the parent to restart.  Normally this is HUP, but nginx-unit decides to be special.
-# Don't do anything if running NOHUP=1, which is useful when doing bulk operations
-sub _restart_parent {
-    my $parent = shift;
-    return if $ENV{NOHUP};
-
-    if ( $ENV{PSGI_ENGINE} && $ENV{PSGI_ENGINE} eq 'nginx-unit' ) {
-        my $conf         = Trog::Config->get();
-        my $nginx_socket = $conf->param('nginx-unit.socket');
-        my $client       = HTTP::Tiny::UNIX->new();
-        my $res          = $client->request( 'GET', "http:$nginx_socket//control/applications/tcms/restart" );
-        WARN("could not reload application (got $res->{status} from nginx-unit)!") unless $res->{status} == 200;
-        return 1;
-    }
-    $parent //= getppid;
+# Instruct tPSGI to reload.
+sub _restart_parent  {
+    my $parent = getppid;
     kill 'HUP', $parent;
 }
 
@@ -1260,6 +1258,47 @@ sub invalidate_render {
 
     $self->INFO("Delete $path as $file");
     unlink "$file";
+}
+
+sub _watch_for_changes {
+    my ($self, @dirs) = @_;
+
+    $self->{wds} //= [];
+
+    $self->{inf} //= Linux::Perl::inotify->new(flags => [qw{NONBLOCK}]);
+    foreach my $directory (@dirs) {
+        # Recursive scan for directories and setting up inotifies
+        push(@dirs, _readdir( $directory ));
+        $self->INFO( "Watching $directory for changes\n" );
+        push(@{$self->{wds}}, $self->{inf}->add( path => $directory, events => [qw{CREATE MODIFY}] ));
+    }
+}
+
+sub restart_if_changes {
+    my $self = shift;
+
+    my @result = $self->{inf}->read();
+    my $had_changes = 0;
+
+    foreach my $res (@result) {
+        if ($res->{name} =~ m/\.pm$/) {
+            $had_changes++;
+            last;
+        }
+    }
+
+    $self->INFO("Relevant Change in libdirs detected, reloading\n");
+    foreach my $wd (@{$self->{wds}}) { $self->{inf}->remove($wd) }
+    $self->signal_restart_parent();
+    return 0;
+}
+
+sub _readdir {
+    my $dir = shift;
+    opendir(my $dh, $dir);
+    my @dirs = map { "$dir/$_" } grep { -d "$dir/$_" && !m/^\.+$/ } readdir($dh);
+    closedir($dh);
+    return @dirs;
 }
 
 1;

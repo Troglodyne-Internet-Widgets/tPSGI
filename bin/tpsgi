@@ -31,6 +31,7 @@ tpsgi obeys a config file, ~/.tpsgi.ini which is in Config::Simple (key=value) f
     basedir     # Directory you want to chdir into on startup. Relative to TPSGI install dir.  Default '.'
     user        # Who to run as
     http_user   # Who's proxying this application (used for statics)
+    autoreload  # Whether or not to automatically reload the application when library files change. Default 0.
 
 The idea is that this application is going to be run in a chroot with the user's homedir being the application dir.
 This is why the various paths asked for are relative to the tPSGI install dir.
