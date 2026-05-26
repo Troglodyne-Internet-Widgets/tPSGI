@@ -97,10 +97,9 @@ sub log {
     state $log;
     return $log if $log;
 
-    my $LOGNAME = "$self->{tpsgi_dir}/log/tpsgi.log";
-    $LOGNAME = $self->{custom_log} if $self->{custom_log};
+    my $LOGNAME= $self->{log_name};
+    my $LOGDIR = $self->{log_dir};
 
-    my $LOGDIR = dirname($LOGNAME);
     File::Path::make_path($LOGDIR) unless -d $LOGDIR;
     File::Touch::touch($LOGNAME)   unless -f $LOGNAME;
 
@@ -622,6 +621,7 @@ sub _app {
         ip       => $ip,
         ua       => $ua,
         referer  => $referer,
+        tpsgi    => $self,
     };
 
     # Disallow any paths that are naughty - this appears to be done by starman automatically.
@@ -884,9 +884,13 @@ sub extract_query {
             return $self->badrequest($query) unless $parameters->{$param}->( $query->{$param} );
         }
 
+        # Without this logging will break.
+        push(@known_params, qw{tpsgi ip ua user referer route dispatcher});
+
         # Smack down passing of unnecessary fields; this catches bugs
         foreach my $field ( keys(%$query) ) {
             next if List::Util::any { $field eq $_ } @known_params;
+            $self->WARN("Unexpected parameter $field passed");
             return $self->badrequest($query);
         }
     }
@@ -1125,6 +1129,15 @@ sub get_config {
             $options{$opt} = $config{$opt} if exists $config{$opt};
         }
     }
+
+    # Build the paths to logs in case apps want to use them or their dir.
+    my $LOGNAME = "$options{tpsgi_dir}/log/tpsgi.log";
+    $LOGNAME = $options{custom_log} if $options{custom_log};
+
+    my $LOGDIR = dirname($LOGNAME);
+    $options{log_dir}  = $LOGDIR;
+    $options{log_name} = $LOGNAME;
+
     return %options;
 }
 
