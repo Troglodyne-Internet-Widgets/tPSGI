@@ -497,7 +497,7 @@ sub ok {
     my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 200 $query->{fullpath}");
     $body //= 'Ok';
-    return _generic( $body, 200 );
+    return _generic( $body, 200, $query );
 }
 
 =head2 notfound, forbidden, badrequest, toolong, error
@@ -516,28 +516,28 @@ sub notfound {
     my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 404 $query->{fullpath}");
     $body //= 'Not Found';
-    return _generic( $body, 404 );
+    return _generic( $body, 404, $query );
 }
 
 sub forbidden {
     my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 403 $query->{fullpath}");
     $body //= 'Forbidden';
-    return _generic( $body, 403 );
+    return _generic( $body, 403, $query );
 }
 
 sub badrequest {
     my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 400 $query->{fullpath}");
     $body //= 'Bad Request';
-    return _generic( $body, 400 );
+    return _generic( $body, 400, $query );
 }
 
 sub toolong {
     my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 419 $query->{fullpath}");
     $body //= 'URI too long';
-    return _generic( $body, 419 );
+    return _generic( $body, 419, $query );
 }
 
 sub error {
@@ -546,14 +546,14 @@ sub error {
     my $fp     = $query->{fullpath} // "?";
     $body //= 'Internal Server Error';
     $self->INFO("$method 500 $fp");
-    return _generic( $body, 500 );
+    return _generic( $body, 500, $query );
 }
 
 sub unavailable {
     my ( $self, $query, $body ) = @_;
     $self->INFO("$query->{method} 503 $query->{fullpath}");
     $body //= 'Service Unavailable';
-    return _generic( $body, 503 );
+    return _generic( $body, 503, $query );
 }
 
 my $cur_query = {};
