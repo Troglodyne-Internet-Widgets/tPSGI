@@ -18,6 +18,7 @@ use IO::Compress::Gzip;
 use Time::HiRes qw{usleep gettimeofday tv_interval};
 
 # For CGI features
+use HTTP::Body;
 use HTTP::Parser::XS qw{HEADERS_AS_HASHREF};
 use CGI::Emulate::PSGI;
 
@@ -25,14 +26,12 @@ use Date::Format qw{strftime};
 use List::Util();
 use File::Find;
 use Sys::Hostname();
-use Plack::MIME ();
 use DateTime::Format::HTTP();
 
 use URL::Encode();
 use File::Touch;
 use File::Path;
 use File::Copy;
-use File::Find;
 use Cwd            qw{abs_path};
 
 use File::Basename qw{dirname basename};
@@ -443,7 +442,7 @@ sub _range {
             }
         }
         $fh->close();
-        $writer->write("\n--$CHUNK_SEP\--\n") if $is_multipart;
+        $writer->write("\n--$CHUNK_SEP--\n") if $is_multipart;
         $writer->close;
     };
 }
