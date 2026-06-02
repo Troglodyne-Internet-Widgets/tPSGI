@@ -40,9 +40,8 @@ use File::Basename qw{dirname basename};
 use Log::Dispatch;
 use Log::Dispatch::Screen;
 use Log::Dispatch::FileRotate;
-use Linux::Perl::inotify;
-
 use Config::Simple;
+use TPSGI::Startup;
 
 # We have a DEBUG var which is plus ultra for extra sensitive stuff beyond just passing verbose
 my $debug = $ENV{TPSGI_DEBUG};
@@ -1096,50 +1095,7 @@ sub static {
     return $self->forbidden( $self->{current_query} );
 }
 
-sub get_config {
-    $ENV{HOME} ||= Cwd::getcwd();
-    my %options = (
-        verbose    => 0,
-        custom_log => undef,
-        routers    => [],
-        loggers    => [],
-        auth       => undef,
-        domain     => '',
-        user       => '',
-        binds      => [],
-        basedir    => '.',
-        http_user  => '',
-		tpsgi_dir  => Cwd::getcwd(),
-        autoreload => 0,
-    );
-    my $config_file = "$ENV{HOME}/.tpsgi.ini";
-    if ( -f $config_file ) {
-        my $conf = Config::Simple->new($config_file);
-        my %config;
-        %config = %{ $conf->param( -block => 'default' ) } if $conf;
-
-        # Merge the configuration with the options
-        foreach my $opt ( keys(%options) ) {
-            if ( ref $options{$opt} eq 'ARRAY' ) {
-                next unless exists $config{$opt};
-                my @arrayed = ref $config{$opt} eq 'ARRAY' ? @{ $config{$opt} } : ( $config{$opt} );
-                push( @{ $options{$opt} }, @arrayed );
-                next;
-            }
-            $options{$opt} = $config{$opt} if exists $config{$opt};
-        }
-    }
-
-    # Build the paths to logs in case apps want to use them or their dir.
-    my $LOGNAME = "$options{tpsgi_dir}/log/tpsgi.log";
-    $LOGNAME = $options{custom_log} if $options{custom_log};
-
-    my $LOGDIR = dirname($LOGNAME);
-    $options{log_dir}  = $LOGDIR;
-    $options{log_name} = $LOGNAME;
-
-    return %options;
-}
+sub get_config { return TPSGI::Startup::get_config(@_) }
 
 # Convenience method to keep track of server-timing
 sub checkpoint {
@@ -1294,22 +1250,7 @@ sub invalidate_renders {
     "$self->{tpsgi_dir}/www/static/");
 }
 
-my @wds;
-my $inotify;
-sub watch_for_changes {
-    my (@dirs) = @_;
-
-    # No point watching again if we already are watching
-    return if @wds;
-
-    $inotify //= Linux::Perl::inotify->new(flags => [qw{NONBLOCK}]);
-    my @to_watch =_readdir( @dirs );
-
-    foreach my $f2watch (@to_watch) {
-        print "Watching $f2watch for changes\n";
-        push(@wds, $inotify->add( path => $f2watch, events => [qw{CREATE MODIFY DELETE MOVE}] ));
-    }
-}
+sub watch_for_changes { return TPSGI::Startup::watch_for_changes(@_) }
 
 =head2 restart_if_changes
 
@@ -1321,35 +1262,21 @@ Powers the autorestart feature.
 sub restart_if_changes {
     my $self = shift;
 
-    my @result = $inotify->read();
+    my @result = $TPSGI::Startup::inotify->read();
     my $had_changes = 0;
 
     foreach my $res (@result) {
-        if ($res->{name} =~ m/\.pm$/) {
+        if ( $res->{name} =~ m/\.pm$/ ) {
             $had_changes++;
             last;
         }
     }
-    return 0 unless $had_changes ;
+    return 0 unless $had_changes;
 
     # We don't have to clean up the wds, that is handled in the destructor for Inotify
     $self->INFO("Relevant Change in libdirs detected, reloading\n");
     $self->signal_restart_parent();
     return 0;
-}
-
-sub _readdir {
-    my @dirs = @_;
-    File::Find::find( {
-        wanted => sub {
-            my $object = $_;
-            push(@dirs, $object) if (-f $object && $object =~ m/\.pm$/);
-        },
-        no_chdir => 1,
-        bydepth => 1,
-    },
-    @dirs);
-    return @dirs;
 }
 
 1;
