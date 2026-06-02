@@ -8,7 +8,7 @@ use FindBin::libs;
 use Plack::Runner;
 
 use File::Basename qw{dirname};
-use TPSGI;
+use TPSGI::Startup;
 
 sub version {
     require Starman;
@@ -18,12 +18,12 @@ sub version {
 # Setup the watcher for changes
 # This has to be setup at global server start rather than app start per worker.
 # This is preferable to using -R (Plack::Loader::Restarter, see notes in orig starman)
-my %options = TPSGI::get_config();
+my %options = TPSGI::Startup::get_config();
 my @dirs = ("$options{tpsgi_dir}/lib");
 foreach my $route (@{$options{routers}}) {
     push(@dirs, dirname("$options{tpsgi_dir}/$route"));
 }
-TPSGI::watch_for_changes(@dirs);
+TPSGI::Startup::watch_for_changes(@dirs);
 
 my $preload_app;
 require Getopt::Long;
