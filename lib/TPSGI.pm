@@ -317,16 +317,17 @@ sub serve {
     push( @headers, 'Accept-Ranges' => 'bytes' );
 
     $self->DEBUG("FETCH $path");
-    my $mt         = ( stat($path) )[9];
-    my $sz         = ( stat(_) )[7];
-    my @gm         = gmtime($mt);
-    my $now_string = strftime( "%a, %d %b %Y %H:%M:%S GMT", @gm );
-    my $code       = $mt > $last_fetch ? 200 : 304;
-
-    push( @headers, "Last-Modified" => $now_string );
-    push( @headers, 'Vary'          => 'Accept-Encoding' );
 
     if ( open( my $fh, '<', $path ) ) {
+        my $mt         = ( stat($fh) )[9];
+        my $sz         = ( stat(_) )[7];
+        my @gm         = gmtime($mt);
+        my $now_string = strftime( "%a, %d %b %Y %H:%M:%S GMT", @gm );
+        my $code       = $mt > $last_fetch ? 200 : 304;
+
+        push( @headers, "Last-Modified" => $now_string );
+        push( @headers, 'Vary'          => 'Accept-Encoding' );
+
         return $self->_range( $fullpath, $fh, $ranges, $sz, @headers ) if @$ranges && $streaming;
 
         # Transfer-encoding: chunked
@@ -725,7 +726,10 @@ sub parse_ranges {
     my $env = shift;
 
     # Handle HTTP range/streaming requests
-    my $range = $env->{HTTP_RANGE} || "bytes=0-" if $env->{HTTP_RANGE} || $env->{HTTP_IF_RANGE};
+    my $range;
+    if ( $env->{HTTP_RANGE} || $env->{HTTP_IF_RANGE} ) {
+        $range = $env->{HTTP_RANGE} || "bytes=0-";
+    }
 
     my @ranges;
     if ($range) {
