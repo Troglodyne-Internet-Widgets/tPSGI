@@ -326,6 +326,9 @@ sub serve {
     push( @headers, "Last-Modified" => $now_string );
     push( @headers, 'Vary'          => 'Accept-Encoding' );
 
+    # RFC 7232 §4.1: 304 responses MUST NOT include a message body.
+    return [ 304, \@headers, [] ] if $code == 304;
+
     if ( open( my $fh, '<', $path ) ) {
         return $self->_range( $fullpath, $fh, $ranges, $sz, @headers ) if @$ranges && $streaming;
 
@@ -636,8 +639,10 @@ sub _app {
     # XXX yes, this allows cache poisoning...but only for logged in users!
     # This also needs to be IN DB so that we coordinate properly across forks
     if ( $env->{HTTP_IF_NONE_MATCH} ) {
-        $self->INFO("$env->{REQUEST_METHOD} 304 $fullpath");
-        return [ 304, [], [''] ] if $env->{HTTP_IF_NONE_MATCH} eq ( $etags{ $env->{REQUEST_URI} } || '' );
+        if ( $env->{HTTP_IF_NONE_MATCH} eq ( $etags{ $env->{REQUEST_URI} } || '' ) ) {
+            $self->INFO("$env->{REQUEST_METHOD} 304 $fullpath");
+            return [ 304, [], [] ];
+        }
         $etags{ $env->{REQUEST_URI} } = $env->{HTTP_IF_NONE_MATCH} unless exists $etags{ $env->{REQUEST_URI} };
     }
 
