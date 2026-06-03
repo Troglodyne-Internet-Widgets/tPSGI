@@ -256,7 +256,7 @@ sub new {
             @aliases{ keys(%$pkg_aliases) } = values(%$pkg_aliases);
 
             # First-come first-served error template overrides
-            $generic_handler = "$package\:\:generic_route";
+            $generic_handler = "$package\:\:generic_route" if defined &{"$package\:\:generic_route"};
         }
         else {
             die "Could not load $route!\n$@\n";
@@ -1092,7 +1092,7 @@ sub static {
 
         return [ $code, [%$headers_parsed], $fh ];
     }
-    return $self->forbidden( $self->{current_query} );
+    return $self->forbidden( $cur_query );
 }
 
 sub get_config { return TPSGI::Startup::get_config(@_) }
