@@ -14,7 +14,6 @@ use Carp::Always;
 use UUID();
 use POSIX();
 use Mojo::File;
-use Plack::MIME;
 use IO::Compress::Gzip;
 use Time::HiRes qw{usleep gettimeofday tv_interval};
 
