@@ -407,8 +407,12 @@ sub _range {
     # Calculate the content-length up-front.  We have to fix unspecified lengths first, and reject bad requests.
     foreach my $range (@$ranges) {
         $range->[1] //= $sz - 1;
-        $self->INFO("GET 416 $fullpath");
-        return [ 416, [%headers], ["Requested range not satisfiable"] ] if $range->[0] > $sz || $range->[0] < 0 || $range->[1] < 0 || $range->[0] > $range->[1];
+        # Clamp overlong range end to last byte of file (RFC 7233 §2.1).
+        $range->[1] = $sz - 1 if $range->[1] >= $sz;
+        if ( $range->[0] > $sz || $range->[0] < 0 || $range->[1] < 0 || $range->[0] > $range->[1] ) {
+            $self->INFO("GET 416 $fullpath");
+            return [ 416, [%headers], ["Requested range not satisfiable"] ];
+        }
     }
     $headers{'Content-Length'} = List::Util::sum( map { my $arr = $_; $arr->[1] + 1, -$arr->[0] } @$ranges );
 
@@ -418,7 +422,7 @@ sub _range {
             $headers{'Content-Length'} += length("$fc--$CHUNK_SEP\n$primary_ct\nContent-Range: bytes $range->[0]-$range->[1]/$sz\n\n");
             $fc = "\n";
         }
-        $headers{'Content-Length'} += length("\n--$CHUNK_SEP\--\n");
+        $headers{'Content-Length'} += length("\n--$CHUNK_SEP--\n");
         $fc = '';
     }
 
