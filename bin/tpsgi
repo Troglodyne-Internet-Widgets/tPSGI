@@ -61,14 +61,5 @@ our $app = sub {
     mkdir "$options{tpsgi_dir}/prof";
 
     my $self = TPSGI->new(%options);
-    return eval { $self->app(@_) } || do {
-		my $env = shift;
-        $env->{'psgi.errors'}->print($@);
-
-		# Redact the stack trace past line 1, it usually has things which should not be shown
-		$self->{cur_query}->{message} = $@;
-		$self->{cur_query}->{message} =~ s/\n.*//g if $self->{cur_query}->{message};
-
-		return $self->error($self->{cur_query});
-    };
+    return $self->app(@_);
 };
