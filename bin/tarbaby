@@ -23,6 +23,10 @@ my @dirs = ("$options{tpsgi_dir}/lib");
 foreach my $route (@{$options{routers}}) {
     push(@dirs, dirname("$options{tpsgi_dir}/$route"));
 }
+foreach my $f (@{$options{watch}}) {
+    # Allow absolute paths or paths relative to tpsgi_dir.
+    push(@dirs, ($f =~ m|^/| ? $f : "$options{tpsgi_dir}/$f"));
+}
 TPSGI::Startup::watch_for_changes(@dirs);
 
 my $preload_app;
