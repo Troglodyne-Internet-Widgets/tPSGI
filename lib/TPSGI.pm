@@ -922,6 +922,21 @@ sub cgi {
     };
 }
 
+# Use when you just have a .cgi file you want to run without pipe-open
+# XXX this is extraordinarily unsafe, inefficient and kills workers.
+# XXX it also has an 'apache-ism' of just assigning the HTTP status line for you.
+# But sometimes you have to bite the bullet and do this to migrate stuff effectively.
+sub stream_raw_cgi {
+    my ($self, $cgi) = @_;
+    my $fh = $self->{filehandle};
+    #XXX this is a lie of an RC, but lol whatever, we can't see the future
+    print $fh "HTTP/1.1 200 OK\n";
+    select $fh;
+    do($cgi);
+    # We may or may not actually get here.
+    close($fh) if $fh;
+}
+
 # Used primarily when we have post-close callbacks
 sub stream_raw_psgi {
     my ( $self, $response, $data ) = @_;
