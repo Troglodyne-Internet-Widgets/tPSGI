@@ -210,7 +210,7 @@ sub new {
     my $pname = getpwuid($>);
     die "Must run as configured user (got: $pname, want: $options{user})!" unless $pname eq ( $options{user} // '' );
     die "Must set http_user in options"                                    unless $options{http_user};
-	die "Must set tpsgi_dir in options"									   unless $options{tpsgi_dir};
+    die "Must set tpsgi_dir in options"                                    unless $options{tpsgi_dir};
 
     my $gid = getgrnam( $options{http_user} );
     die "No such user $options{http_user}" unless $gid;
@@ -233,7 +233,7 @@ sub new {
         my $r         = "$package\:\:routes";
         my $a         = "$package\:\:aliases";
 
-		# It also should be a top-level namespace, not somewhere deep down. KISS.
+        # It also should be a top-level namespace, not somewhere deep down. KISS.
         my $libdir = dirname("$options{tpsgi_dir}/$route");
         push( @INC, $libdir );
 
@@ -579,7 +579,7 @@ sub _app {
     my $start = [gettimeofday];
     $cur_query = {};
 
-	my $env = shift;
+    my $env = shift;
     $self->{filehandle} = $env->{'psgix.io'} // *STDOUT;
 
     # Setup the unique ID for the request
@@ -623,7 +623,7 @@ sub _app {
 
     # Disallow any paths that are naughty - this appears to be done by starman automatically.
     #if ( index($path, '..') != -1 ) {
-    #	return $self->forbidden($cur_query);
+    #   return $self->forbidden($cur_query);
     #}
 
     # Support aliased paths
@@ -935,6 +935,7 @@ sub stream_raw_cgi {
     do($cgi);
     # We may or may not actually get here.
     close($fh) if $fh;
+    exit 0;
 }
 
 # Used primarily when we have post-close callbacks
