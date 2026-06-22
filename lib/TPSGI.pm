@@ -255,6 +255,7 @@ sub new {
 
             # First-come first-served error template overrides
             $generic_handler = "$package\:\:generic_route";
+            $generic_handler = undef unless exists &{$generic_handler};
         }
         else {
             die "Could not load $route!\n$@\n";
@@ -581,6 +582,7 @@ sub _app {
 
     my $env = shift;
     $self->{filehandle} = $env->{'psgix.io'} // *STDOUT;
+    $self->{input} = $env->{'psgi.input'};
 
     # Setup the unique ID for the request
     $env->{REQUEST_ID} = $self->request_id(1);
@@ -756,8 +758,8 @@ sub route {
 
     $self->DEBUG( 'Executing route ' . $route->{pattern} );
 
+    $route->{method} = $env->{REQUEST_METHOD} if $route->{method} eq '*';
     my $content_type = $env->{CONTENT_TYPE} || 'text/html';    # If not set, that's the assumption.
-                                                               # It is the responsibility of each route to respond to HEAD requests correctly
     return $self->badrequest($cur_query) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } grep { defined $_ } ( 'HEAD', $route->{method} );
 
     my $callback;
@@ -773,7 +775,9 @@ sub route {
 
     # Build the query data for passing to a route.
     # GET, POST, URI captures, then explicit data overrides.
-    my $query = $self->extract_query( $path, $route, $env );
+    my $query = {};
+    # If we're running in CGI mode, leave everything as-is.
+    $query = $self->extract_query( $path, $route, $env ) unless $route->{env};
 
     # We failed validation if $query isn't a hashref.
     return $query if ref $query eq 'ARRAY';
@@ -810,6 +814,8 @@ sub route {
 
     # Setup the CGI vars they expect IF requested
     local %ENV = ( %ENV, CGI::Emulate::PSGI->emulate_environment($env) ) if $route->{env};
+    # Emulate mod_unique_id
+    $ENV{UNIQUE_ID} = UUID::uuid() if $route->{env};
 
     # Make this a truly 'dynamic' application if requested.
     $self->restart_if_changes() if $self->{autoreload};
@@ -928,10 +934,15 @@ sub cgi {
 # But sometimes you have to bite the bullet and do this to migrate stuff effectively.
 sub stream_raw_cgi {
     my ($self, $cgi) = @_;
+
+    # Discard STDIN in favor of the HTTP body
+    close(STDIN);
+    *STDIN = $self->{input};
+
+    # Similarly make 'print' do what CGIs expect
     my $fh = $self->{filehandle};
-    #XXX this is a lie of an RC, but lol whatever, we can't see the future
-    print $fh "HTTP/1.1 200 OK\n";
     select $fh;
+
     do($cgi);
     # We may or may not actually get here.
     close($fh) if $fh;
