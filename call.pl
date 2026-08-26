@@ -35,10 +35,17 @@ our $app = sub {
     # We are debugging here
     $cfg{verbose} = 1;
 
+    # Change your dir into whatever basedir you need to be in
+    chdir($cfg{'basedir'}) || warn "Can't chdir to $cfg{'basedir'}: $_";
+
+    # If we have manually set the NYTPROF var, use it and don't try to control
+    # When to stop or start it.
+    $ENV{NYTPROF} ||= "sigexit=1:savesrc=0:start=no:file=$cfg{tpsgi_dir}/prof/nytprof.out";
+    require Devel::NYTProf;
+    mkdir "$cfg{tpsgi_dir}/prof";
+
     my $self = TPSGI->new(%cfg);
     local $@;
-
-    chdir($cfg{'basedir'}) || warn "Can't chdir to $cfg{'basedir'}: $_";
 
     return eval { $self->app(@_) } || do {
         my $env = shift;
