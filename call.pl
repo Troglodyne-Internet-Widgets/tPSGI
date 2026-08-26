@@ -11,6 +11,14 @@ use Carp::Always;
 #Grab our custom routes
 use TPSGI;
 
+=head1 USAGE
+
+    call.pl METHOD ROUTE QUERY_STRING COOKIE REPEAT_X_TIMES MAX_REDIRECTS
+
+Max redirects default is 6.
+
+=cut
+
 my $host = $ENV{DOMAIN} // 'localhost';
 
 my %env = (
@@ -19,6 +27,7 @@ my %env = (
     QUERY_STRING   => $ARGV[2],
     REQUEST_URI    => "http://$host/".$ARGV[1],
     HTTP_HOST      => $host,
+    HTTP_COOKIE    => $ARGV[3],
     'psgi.errors'  => *STDERR,
     'psgi.input'   => *STDIN,
 );
@@ -29,8 +38,14 @@ sub emit_error {
     print $@;
 }
 
+my %cfg;
 our $app = sub {
-    my %cfg = TPSGI::get_config();
+    # Allow re-run
+    if (%cfg) {
+        chdir($cfg{tpsgi_dir}) || warn "Can't chdir to $cfg{tpsgi_dir}: $_";
+    }
+
+    %cfg = TPSGI::get_config();
 
     # We are debugging here
     $cfg{verbose} = 1;
@@ -67,15 +82,31 @@ sub stream_to_stdout {
     return \*STDOUT;
 }
 
-my $limit = $ARGV[3] || 1;
+my $limit = $ARGV[4] || 1;
+my $max_redirects = $ARGV[5] || 6;
+my $redirects=0;
 
 for ( 1 .. $limit ) {
+    LOOP:
     my $out = $app->( \%env );
+
     if (ref $out eq 'CODE') {
         $out->(\&stream_to_stdout);
         next;
     }
     if (ref $out eq 'ARRAY') {
+        # Might be a redirect, so check
+        my $rc = $out->[0];
+        my %hdr = @{$out->[1]};
+        my $to = $hdr{Location};
+        if ($to) {
+            $env{REQUEST_URI} = "http://$host/$to";
+            $env{PATH_INFO}   = $to;
+            $redirects++;
+            die "Max redirects reached!" unless $redirects < $max_redirects;
+            goto LOOP;
+        }
+
         print $out->[2][0];
         next;
     }
