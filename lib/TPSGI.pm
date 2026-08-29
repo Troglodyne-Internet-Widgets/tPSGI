@@ -910,7 +910,11 @@ sub cgi {
     # Setup the CGI vars they expect
     local %ENV = ( %ENV, CGI::Emulate::PSGI->emulate_environment($env) );
 
-    my $pid = open( my $out, '-|', "$file_actual" );
+    # Use the two-element list form so Perl exec()s the script directly
+    # instead of passing it through /bin/sh, preventing shell injection via
+    # filenames that contain shell metacharacters.
+    my $pid = open( my $out, '-|', $file_actual, basename($file_actual) );
+    die "Could not fork CGI $file_actual: $!" unless defined $pid;
     my ( $code, $offset, %headers ) = extract_headers( $out, $last_fetch );
     $code //= 500;
     return sub {
@@ -1060,8 +1064,10 @@ sub extract_headers {
     my $headers = '';
 
     # NOTE: this is relying on while advancing the file pointer
+    # Accept both LF ("\n") and CRLF ("\r\n") as blank-line terminators,
+    # per HTTP/1.1 which mandates CRLF but real-world CGIs often emit LF only.
     while (<$fh>) {
-        last if $_ eq "\n";
+        last if $_ =~ /^\r?\n$/;
         $headers .= $_;
     }
 
@@ -1075,7 +1081,7 @@ sub extract_headers {
         my $mt         = ( stat($fh) )[9];
         my @gm         = gmtime($mt);
         my $now_string = strftime( "%a, %d %b %Y %H:%M:%S GMT", @gm );
-        $code = $mt > $last_fetch ? $status : 304;
+        $code = $mt > $last_fetch ? ($status // 200) : 304;
         $headers_parsed->{"Last-Modified"} = $now_string;
     }
 
