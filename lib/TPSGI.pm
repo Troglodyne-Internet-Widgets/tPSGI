@@ -405,6 +405,13 @@ sub _range {
 
     # Calculate the content-length up-front.  We have to fix unspecified lengths first, and reject bad requests.
     foreach my $range (@$ranges) {
+        # Suffix-byte-range (RFC 7233 §2.1): bytes=-N means the last N bytes.
+        # split(/-/, "-500") gives ("", "500"), so first element is an empty string.
+        if ( defined($range->[0]) && $range->[0] eq '' ) {
+            my $suffix_len = $range->[1] + 0;
+            $range->[0] = $sz > $suffix_len ? $sz - $suffix_len : 0;
+            $range->[1] = $sz - 1;
+        }
         $range->[1] //= $sz - 1;
         $self->INFO("GET 416 $fullpath");
         return [ 416, [%headers], ["Requested range not satisfiable"] ] if $range->[0] > $sz || $range->[0] < 0 || $range->[1] < 0 || $range->[0] > $range->[1];
@@ -1091,6 +1098,8 @@ sub static {
     if ( open( my $fh, '<', "statics/$path" ) ) {
         my ( $code, $offset, $headers_parsed ) = ( 200, undef, {} );
         ( $code, $offset, %$headers_parsed ) = extract_headers( $fh, $last_fetch );
+
+        return [ 304, [%$headers_parsed], [] ] if $code == 304;
 
         # Append server-timing headers
         my $tot = tv_interval($start) * 1000;
