@@ -668,13 +668,17 @@ sub _app {
     my $streaming = $env->{'psgi.streaming'};
 
     # If we have an actual route, just use it.
-    my $r           = $self->routes;
-    my $route_index = List::Util::first { ( $r->[$_] // '' ) eq $path } 0 .. scalar(@$r);
+    # Routes are stored as flat pairs: [pattern0, handler0, pattern1, handler1, ...]
+    # Only even indices hold patterns; odd indices hold handler hashrefs.
+    my $r = $self->routes;
+    my @pattern_indices = grep { !( $_ % 2 ) } 0 .. $#$r;
+
+    my $route_index = List::Util::first { ( $r->[$_] // '' ) eq $path } @pattern_indices;
 
     my $route_actual;
     $route_actual = $r->[ $route_index + 1 ] if defined($route_index);
 
-    # Might be a regexed route. Sort reversed so we try the longest routes first.
+    # Might be a regexed route.
     if ( !$route_actual && @$r ) {
         my $matched = List::Util::first {
 
@@ -683,7 +687,7 @@ sub _app {
             #print $r->[$_]."\n";
             $path =~ m/^$r->[$_]$/;
         }
-        0 .. scalar(@$r) - 1;
+        @pattern_indices;
         $route_actual = $r->[ $matched + 1 ] if defined($matched);
     }
 
