@@ -24,7 +24,6 @@ use CGI::Emulate::PSGI;
 
 use Date::Format qw{strftime};
 use List::Util();
-use File::Find;
 use Sys::Hostname();
 use DateTime::Format::HTTP();
 
@@ -75,6 +74,19 @@ my %extra_types = (
 );
 
 my $ct = 'Content-type';
+
+# MIME types that are already compressed — gzip would waste CPU and bloat responses
+my %incompressible_mime = map { $_ => 1 } qw{
+    image/jpeg image/png image/gif image/webp image/avif image/heic
+    audio/mpeg audio/ogg audio/mp4 audio/webm audio/flac
+    video/mp4 video/webm video/ogg video/quicktime video/x-msvideo
+    application/zip application/gzip application/x-bzip2 application/x-xz
+    application/x-7z-compressed application/zstd
+    application/pdf application/wasm
+    application/vnd.openxmlformats-officedocument.wordprocessingml.document
+    application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+    application/vnd.openxmlformats-officedocument.presentationml.presentation
+};
 
 #memoize
 my $rq;
@@ -341,8 +353,8 @@ sub serve {
           }
           if $streaming && $sz > $CHUNK_SIZE;
 
-        #Return data in the event the caller does not support deflate
-        if ( !$deflate ) {
+        #Return data in the event the caller does not support deflate, or content is already compressed
+        if ( !$deflate || $incompressible_mime{$ft} ) {
             push( @headers, "Content-Length" => $sz );
 
             # Append server-timing headers
@@ -352,7 +364,7 @@ sub serve {
             return [ $code, \@headers, $fh ];
         }
 
-        #Compress everything less than 1MB
+        #Compress text content (< 1MB, enforced by the streaming path above)
         push( @headers, "Content-Encoding" => "gzip" );
         my $dfh;
         IO::Compress::Gzip::gzip( $fh => \$dfh );
@@ -652,12 +664,7 @@ sub _app {
         $last_fetch = DateTime::Format::HTTP->parse_datetime( $env->{HTTP_IF_MODIFIED_SINCE} )->epoch();
     }
 
-    # Figure out if we want compression or not
-    my $alist = $env->{HTTP_ACCEPT_ENCODING} || '';
-    $alist =~ s/\s//g;
-    my @accept_encodings;
-    @accept_encodings = split( /,/, $alist );
-    my $deflate = grep { 'gzip' eq $_ } @accept_encodings;
+    my $deflate = _accepts_gzip( $env->{HTTP_ACCEPT_ENCODING} );
 
     # Set the IP of the request so we can fail2ban
     $self->{ip} = $env->{HTTP_X_FORWARDED_FOR} || $env->{REMOTE_ADDR} || $self->{ip};
@@ -736,6 +743,12 @@ sub parse_ranges {
         );
     }
     return @ranges;
+}
+
+sub _accepts_gzip {
+    my $alist = shift // '';
+    $alist =~ s/\s//g;
+    return (grep { 'gzip' eq $_ } map { s/;.*//r } split( /,/, $alist )) ? 1 : 0;
 }
 
 my @executable_extensions = qw{cgi sh exe pl php py};
