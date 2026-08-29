@@ -1290,8 +1290,14 @@ sub restart_if_changes {
     my @result = $TPSGI::Startup::inotify->read();
     my $had_changes = 0;
 
+    my %file_wd_set = map { $_ => 1 } @TPSGI::Startup::file_wds;
+
     foreach my $res (@result) {
-        if ( $res->{name} =~ m/\.pm$/ ) {
+        my $is_pm     = $res->{name} && $res->{name} =~ m/\.pm$/;
+        # Events from direct file watches (not directory watches) have an empty
+        # name field; any such event means an explicitly watched file changed.
+        my $is_direct = !$res->{name} && %file_wd_set;
+        if ( $is_pm || $is_direct ) {
             $had_changes++;
             last;
         }
