@@ -848,7 +848,12 @@ sub route {
 sub extract_query {
     my ( $self, $path, $route, $env ) = @_;
 
-    my $query = URL::Encode::url_params_mixed( $env->{QUERY_STRING} ) if $env->{QUERY_STRING};
+    # `my $x = expr if cond` has undefined behavior in Perl when cond is false — $x may
+    # retain its value from the previous subroutine call rather than resetting to undef.
+    # Use the ternary form so $query is always initialized to a fresh hashref.
+    my $query = $env->{QUERY_STRING}
+        ? URL::Encode::url_params_mixed( $env->{QUERY_STRING} )
+        : {};
 
     #Actually parse the POSTDATA and dump it into the QUERY object if this is a POST
     if ( $env->{REQUEST_METHOD} eq 'POST' ) {
@@ -887,6 +892,10 @@ sub extract_query {
             return $self->badrequest($query) unless $parameters->{$param}->( $query->{$param} );
         }
 
+        # Captures and static data fields are route-defined, not user-supplied; always allow them.
+        push(@known_params, @{ $route->{captures} })          if ref $route->{captures} eq 'ARRAY';
+        push(@known_params, keys %{ $route->{data} })         if ref $route->{data}     eq 'HASH';
+
         # Without this logging will break.
         push(@known_params, qw{tpsgi ip ua user referer route dispatcher});
 
@@ -910,7 +919,7 @@ sub cgi {
     # Setup the CGI vars they expect
     local %ENV = ( %ENV, CGI::Emulate::PSGI->emulate_environment($env) );
 
-    my $pid = open( my $out, '-|', "$file_actual" );
+    my $pid = open( my $out, '-|', $file_actual );
     my ( $code, $offset, %headers ) = extract_headers( $out, $last_fetch );
     $code //= 500;
     return sub {
@@ -969,8 +978,8 @@ sub stream_raw_psgi {
     }
     print $fh "\n";
 
-    # Emit the body
-    print $fh $response->[2][0];
+    # Emit the body (PSGI body is an arrayref of strings)
+    print $fh $_ for @{ $response->[2] };
 
     close($fh);
 
