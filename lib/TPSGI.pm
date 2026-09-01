@@ -32,7 +32,7 @@ use URL::Encode();
 use File::Touch;
 use File::Path;
 use File::Copy;
-use Cwd            qw{abs_path};
+use Cwd qw{abs_path};
 
 use File::Basename qw{dirname basename};
 use Log::Dispatch;
@@ -94,8 +94,8 @@ sub log {
     state $log;
     return $log if $log;
 
-    my $LOGNAME= $self->{log_name};
-    my $LOGDIR = $self->{log_dir};
+    my $LOGNAME = $self->{log_name};
+    my $LOGDIR  = $self->{log_dir};
 
     File::Path::make_path($LOGDIR) unless -d $LOGDIR;
     File::Touch::touch($LOGNAME)   unless -f $LOGNAME;
@@ -232,6 +232,7 @@ sub new {
         my ($package) = basename($route) =~ m/(\S+)\.pm$/;
         my $r         = "$package\:\:routes";
         my $a         = "$package\:\:aliases";
+        my $w         = "$package\:\:watches";
 
         # It also should be a top-level namespace, not somewhere deep down. KISS.
         my $libdir = dirname("$options{tpsgi_dir}/$route");
@@ -252,6 +253,17 @@ sub new {
                 $self->DEBUG("aliased route $al to $pkg_aliases->{$al}");
             }
             @aliases{ keys(%$pkg_aliases) } = values(%$pkg_aliases);
+
+            # Anything the router wants to watch, along with what to do when it changes.
+            # Registration is idempotent, which matters because new() runs per request.
+            my $pkg_watches = *$w{HASH};
+            foreach my $watched ( keys(%$pkg_watches) ) {
+                my $spec = $pkg_watches->{$watched};
+
+                # Copied rather than used directly, as we don't want to eat the router's own data.
+                my %args = ref $spec eq 'HASH' ? %$spec : ( callback => $spec );
+                $self->add_watch( $watched, delete $args{callback}, %args );
+            }
 
             # First-come first-served error template overrides
             $generic_handler = "$package\:\:generic_route";
@@ -371,6 +383,7 @@ sub serve {
             if ( !-d $target_dir ) {
                 File::Path::make_path( $target_dir, { user => $<, group => $self->{gid}, chmod => 0755 } ) or die "Could not make dir $target_dir";
             }
+
             # hardlink to save disk space
             link $path, $static_path;
 
@@ -582,7 +595,7 @@ sub _app {
 
     my $env = shift;
     $self->{filehandle} = $env->{'psgix.io'} // *STDOUT;
-    $self->{input} = $env->{'psgi.input'};
+    $self->{input}      = $env->{'psgi.input'};
 
     # Setup the unique ID for the request
     $env->{REQUEST_ID} = $self->request_id(1);
@@ -592,7 +605,7 @@ sub _app {
 
     # Various stuff important for logging requests
     my $domain = $env->{HTTP_X_FORWARDED_HOST} || $env->{HTTP_HOST} // eval { Sys::Hostname::hostname() };
-    my $path   = $env->{PATH_INFO} || '/';
+    my $path   = $env->{PATH_INFO}             || '/';
 
     # de-pooplicate the path
     $path =~ s|//|/|g;
@@ -776,6 +789,7 @@ sub route {
     # Build the query data for passing to a route.
     # GET, POST, URI captures, then explicit data overrides.
     my $query = {};
+
     # If we're running in CGI mode, leave everything as-is.
     $query = $self->extract_query( $path, $route, $env ) unless $route->{env};
 
@@ -814,11 +828,12 @@ sub route {
 
     # Setup the CGI vars they expect IF requested
     local %ENV = ( %ENV, CGI::Emulate::PSGI->emulate_environment($env) ) if $route->{env};
+
     # Emulate mod_unique_id
     $ENV{UNIQUE_ID} = UUID::uuid() if $route->{env};
 
-    # Make this a truly 'dynamic' application if requested.
-    $self->restart_if_changes() if $self->{autoreload};
+    # Run any watch callbacks, and make this a truly 'dynamic' application if requested.
+    $self->handle_changes();
 
     {
         my $output = $callback->( $self, $query );
@@ -874,7 +889,7 @@ sub extract_query {
     # Now that we've parsed the query and know where we want to go,
     # we should (optionally) murder everything the route does not explicitly want, and validate what it does
     my $parameters = $route->{parameters};
-    if (ref $parameters eq 'HASH' && %$parameters) {
+    if ( ref $parameters eq 'HASH' && %$parameters ) {
         my @known_params = keys(%$parameters);
         for my $param (@known_params) {
             die "Invalid route definition for $path: parameter $param must correspond to a validation CODEREF." unless ref $parameters->{$param} eq 'CODE';
@@ -888,7 +903,7 @@ sub extract_query {
         }
 
         # Without this logging will break.
-        push(@known_params, qw{tpsgi ip ua user referer route dispatcher});
+        push( @known_params, qw{tpsgi ip ua user referer route dispatcher} );
 
         # Smack down passing of unnecessary fields; this catches bugs
         foreach my $field ( keys(%$query) ) {
@@ -933,7 +948,7 @@ sub cgi {
 # XXX it also has an 'apache-ism' of just assigning the HTTP status line for you.
 # But sometimes you have to bite the bullet and do this to migrate stuff effectively.
 sub stream_raw_cgi {
-    my ($self, $cgi) = @_;
+    my ( $self, $cgi ) = @_;
 
     # Discard STDIN in favor of the HTTP body
     close(STDIN);
@@ -944,6 +959,7 @@ sub stream_raw_cgi {
     select $fh;
 
     do($cgi);
+
     # We may or may not actually get here.
     close($fh) if $fh;
     exit 0;
@@ -1171,7 +1187,7 @@ sub signal_restart_parent {
 }
 
 # Instruct tPSGI to reload.
-sub _restart_parent  {
+sub _restart_parent {
     my $parent = getppid;
     kill 'HUP', $parent;
 }
@@ -1198,8 +1214,8 @@ sub save_render {
     return unless $path && $extension;
 
     # If this is an index, let's make it so
-    if ($path =~ m|/$|) {
-        $path = $path.'index';
+    if ( $path =~ m|/$| ) {
+        $path = $path . 'index';
     }
 
     # Fixup the extension if needed.
@@ -1250,7 +1266,7 @@ sub invalidate_render {
 }
 
 sub _invalidate {
-    my ($self, $file) = @_;
+    my ( $self, $file ) = @_;
     $self->INFO("Delete $file");
     unlink "$file";
 }
@@ -1263,45 +1279,169 @@ Useful when it's not easy to figure out what to re-render due to including templ
 =cut
 
 sub invalidate_renders {
-    my ($self, $extension) = @_;
-    File::Find::find( {
-        wanted => sub {
-            my $object = $_;
-            $self->_invalidate($object) if (-f $object && $object =~ m/\.\Q$extension\E$/);
+    my ( $self, $extension ) = @_;
+    File::Find::find(
+        {
+            wanted => sub {
+                my $object = $_;
+                $self->_invalidate($object) if ( -f $object && $object =~ m/\.\Q$extension\E$/ );
+            },
+            no_chdir => 1,
+            bydepth  => 1,
         },
-        no_chdir => 1,
-        bydepth => 1,
-    },
-    "$self->{tpsgi_dir}/www/static/");
+        "$self->{tpsgi_dir}/www/static/"
+    );
 }
 
 sub watch_for_changes { return TPSGI::Startup::watch_for_changes(@_) }
 
-=head2 restart_if_changes
+=head2 add_watch($path, $callback, %options)
 
-Restart tPSGI if any of the relevant libdir files change.
-Powers the autorestart feature.
+Add an arbitrary file or directory to the inotify watchlist, along with a
+callback to run when it changes.  Returns the inotify watch descriptor.
+
+The callback is invoked as:
+
+    $callback->( $tpsgi, $change );
+
+...where $change is a HASH reference describing what happened:
+
+    path    => full path of the thing which changed
+    watched => the path the watch was registered against
+    events  => ARRAY reference of event names, e.g. [ 'MODIFY' ]
+    name    => entry within a watched directory, if the watch was on a directory
+    wd      => inotify watch descriptor
+    mask    => raw inotify event mask
+
+Which makes the common case - blowing away a static render because the thing it
+was generated from changed - look like:
+
+    $tpsgi->add_watch( "data/posts.json", sub {
+        my ( $tpsgi, $change ) = @_;
+        $tpsgi->invalidate_renders('html');
+    });
+
+%options are passed through to TPSGI::Startup::add_watch, so you may also pass
+'events' (defaults to CREATE, MODIFY, DELETE and MOVE) and 'key' (an explicit
+dedupe key for the callback).
+
+Some caveats worth knowing about:
+
+=over
+
+=item * Watches live in the inotify instance tarbaby sets up before forking, and
+are therefore shared by every worker.  Whichever worker notices a change first
+consumes it for all of them, so register the same callbacks in every worker
+(declare them in your router module, which every worker loads) and make sure
+they're safe to run in any worker.
+
+=item * Changes are only noticed when a request comes in, since nothing is
+sitting in a select loop over the inotify FD.  Renders are invalidated promptly
+in practice, but not instantly.
+
+=item * Watching a directory rather than a single file is more robust, as
+watching a file which is later replaced wholesale (the usual write-tempfile-then-
+rename dance) only survives because we re-establish the watch afterwards.  If
+the file is deleted and not immediately recreated, the watch is gone for good.
+
+=back
 
 =cut
 
-sub restart_if_changes {
+sub add_watch {
+    my ( $self, $path, $callback, %options ) = @_;
+
+    my $existing = TPSGI::Startup::is_watched($path);
+
+    # A watch we can't establish (the usual cause being a path which isn't there yet)
+    # shouldn't be fatal to the request which happened to be the one registering it.
+    local $@;
+    my $wd = eval {
+        TPSGI::Startup::add_watch(
+            %options,
+            path     => $path,
+            callback => $callback,
+        );
+    };
+    if ( !defined $wd ) {
+        my $why = $@;
+        $why =~ s/\n.*//s if $why;
+        $self->WARN("Could not watch $path for changes: $why");
+        return undef;
+    }
+
+    $self->DEBUG("Watching $path for changes") unless $existing;
+
+    return $wd;
+}
+
+=head2 remove_watch($path)
+
+Drop a path, and any callbacks registered against it, from the watchlist.
+
+=cut
+
+sub remove_watch {
+    my ( $self, $path ) = @_;
+    return TPSGI::Startup::remove_watch($path);
+}
+
+=head2 handle_changes
+
+Drain the inotify queue, running the callbacks registered for whatever changed,
+and restart tPSGI if any of the relevant libdir files changed (assuming
+autoreload is on).  Powers both the autorestart feature and app-registered
+watches.
+
+=cut
+
+sub handle_changes {
     my $self = shift;
 
-    my @result = $TPSGI::Startup::inotify->read();
-    my $had_changes = 0;
+    my @changes = TPSGI::Startup::pending_changes();
+    return 0 unless @changes;
 
-    foreach my $res (@result) {
-        if ( $res->{name} =~ m/\.pm$/ ) {
-            $had_changes++;
-            last;
+    my $had_changes = 0;
+    my @rewatch;
+
+    foreach my $change (@changes) {
+        my $watch = $change->{watch};
+
+        # A watch descriptor we know nothing about belongs to a worker which registered
+        # watches we didn't.  All we can sensibly do with those is the old behavior.
+        if ( !$watch ) {
+            $had_changes++ if $change->{path} =~ m/\.pm$/;
+            next;
         }
+
+        $had_changes++ if $watch->{restart} && $change->{path} =~ m/\.pm$/;
+
+        foreach my $cb ( @{ $watch->{callbacks} } ) {
+            local $@;
+            my $ok = eval { $cb->{code}->( $self, $change ); 1 };
+            $self->WARN("Watch callback for $change->{path} died: $@") unless $ok;
+        }
+
+        # The kernel drops watches on files which get replaced or deleted, so put them back.
+        push( @rewatch, $change->{wd} ) if grep { $_ eq 'IGNORED' } @{ $change->{events} };
     }
-    return 0 unless $had_changes;
+
+    TPSGI::Startup::rewatch($_) foreach @rewatch;
+
+    return 0 unless $had_changes && $self->{autoreload};
 
     # We don't have to clean up the wds, that is handled in the destructor for Inotify
     $self->INFO("Relevant Change in libdirs detected, reloading\n");
     $self->signal_restart_parent();
     return 0;
 }
+
+=head2 restart_if_changes
+
+Deprecated alias for handle_changes().
+
+=cut
+
+sub restart_if_changes { goto &handle_changes }
 
 1;

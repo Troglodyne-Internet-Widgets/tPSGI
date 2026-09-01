@@ -79,6 +79,57 @@ Router callbacks are passed the TPSGI object and the raw query, which means you 
         return [200, \%headers, ["Hello world"]]
     }
 
+## Watching files for changes
+
+tPSGI already watches your library directories with inotify so that it can reload itself when your
+code changes.  Your application can put arbitrary files and directories onto that same watchlist,
+along with a callback to run when they change.  The usual reason to want this is throwing away a
+static render because the thing it was generated from changed underneath it.
+
+Routing modules declare these the same way they declare routes:
+
+```
+our %watches = (
+    # A bare coderef is the common case: run this when the path changes.
+    'data/posts.json' => sub {
+        my ($tpsgi, $change) = @_;
+        $tpsgi->invalidate_renders('html');
+    },
+
+    # Or spell it out if you want to be picky about which events you care about.
+    'www/assets' => {
+        callback => \&asset_changed,
+        events   => [qw{CREATE MOVE}],
+    },
+);
+```
+
+...or register them at runtime with `$tpsgi->add_watch($path, $callback, %options)`, and drop them
+again with `$tpsgi->remove_watch($path)`.
+
+Callbacks are passed the TPSGI object and a hashref describing what happened:
+
+    sub asset_changed {
+        my ($tpsgi, $change) = @_;
+
+        $change->{path};    # full path of the thing which changed
+        $change->{watched}; # the path the watch was registered against
+        $change->{events};  # arrayref of event names, e.g. ['MODIFY']
+
+        $tpsgi->invalidate_render($change->{path}, 'html');
+    }
+
+A few things worth knowing:
+
+* Watches are shared by every worker, so whichever worker notices a change first consumes it for all
+  of them.  Declare your watches in your routing module (which every worker loads) rather than from
+  inside a single route, and make the callbacks safe to run in any worker.
+* Nothing sits in a select loop over the inotify descriptor, so changes are noticed when the next
+  request comes in.  Prompt, but not instant.
+* Watching the containing directory is more robust than watching a single file.  Watches on files
+  which get replaced wholesale (write a tempfile, rename over the target) are re-established
+  afterwards, but a file which is deleted and not recreated takes its watch with it.
+
 ## Custom Authentication handling
 
 The (optional) Authentication handler can be passed, and look like so:

@@ -42,10 +42,15 @@ WriteMakefile(
         "Plack" => "0",
         "Plack::MIME" => "0",
         "POSIX" => "0",
+        "Scalar::Util" => "0",
         "Starman" => "0",
         "Sys::Hostname" => "0",
         "URL::Encode" => "0",
         "UUID" => "0",
+    },
+    TEST_REQUIRES => {
+        "File::Temp" => "0",
+        "Test2::V0"  => "0",
     },
     test => {TESTS => 't/*.t'}
 );
