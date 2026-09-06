@@ -11,6 +11,19 @@ Type=forking
 PIDFile=__REPLACEME__/run/tpsgi.pid
 Environment=PATH='__PERL5BIN__' HOME=__REPLACEME__/
 ExecStart=__REPLACEME__/service/tpsgi.sh
+
+# Secrets the application needs and should not be storing next to itself.  Taken
+# from the system credential store -- /etc/credstore, or /etc/credstore.encrypted
+# for one sealed to this machine's TPM -- and put in a ramdisk under
+# /run/credentials that only this service can read.
+#
+# Not fatal when there is nothing there, which is the point of ImportCredential
+# over LoadCredential: an installation with no secrets to hand over is an
+# installation that starts normally.
+#
+# The workers end up chrooted into WorkingDirectory and /run/credentials is
+# outside it, so service/tpsgi.sh reads what it needs before that happens.
+ImportCredential=tcms-vault
 WorkingDirectory=__REPLACEME__/
 Restart=always
 OOMPolicy=stop

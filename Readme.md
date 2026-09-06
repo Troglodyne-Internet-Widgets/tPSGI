@@ -203,3 +203,32 @@ In general the operation is like so:
 Generally you'll just run bin/build\_service and then systemctl start $domain.
 It's configured to start as root, then drop privs thanks to Net::Server's capabilities inherited in starman.
 
+### Secrets the application needs
+
+An application often needs a key or a password that has no business living in
+its own checkout, where it would go into every backup alongside whatever it
+protects.  The unit imports those from systemd's credential store and
+service/tpsgi.sh hands them on.
+
+Put one there, sealed to this machine so that the file is useless anywhere else:
+
+    openssl rand -base64 32 \
+      | sudo systemd-creds encrypt --name=tcms-vault - /etc/credstore.encrypted/tcms-vault
+
+...or unencrypted, if the machine has no TPM, in which case it is a root-owned
+file rather than a sealed one:
+
+    openssl rand -base64 32 | sudo tee /etc/credstore/tcms-vault > /dev/null
+    sudo chmod 600 /etc/credstore/tcms-vault
+
+systemd decrypts it into a ramdisk at `/run/credentials/$service` that only this
+service can read.  Nothing is written down in the unit, and nothing breaks if it
+is not there: `ImportCredential=` is quiet about a credential that does not
+exist, so an installation with no secrets to hand over starts normally.
+
+The workers are chrooted into the application directory and that ramdisk is
+outside it, so service/tpsgi.sh reads the credential before the chroot happens
+and exports it -- `tcms-vault` becomes `TCMS_VAULT_KEY`.  An application taking
+one of these is expected to read it out of its environment as it starts and
+delete it there and then, so that nothing it forks afterwards inherits it.
+

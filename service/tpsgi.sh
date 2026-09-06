@@ -11,6 +11,19 @@ echo "tPSGI running with EGID $GROUP";
 
 [[ -e run/tpsgi.pid ]] && sudo pkill -F run/tpsgi.pid
 
+# Hand the application whatever systemd put in the credential store.  It has to
+# happen here: tarbaby chroots the workers into this directory, and the store is
+# a ramdisk at /run/credentials which is not inside it.  So the file is read
+# while there is still a path to it, and what was in it goes on in the
+# environment, which survives the chroot.
+#
+# The application is expected to take it back out of its own environment as it
+# starts, so that nothing it forks later inherits it.
+if [[ -n $CREDENTIALS_DIRECTORY && -r "$CREDENTIALS_DIRECTORY/tcms-vault" ]]; then
+    export TCMS_VAULT_KEY=$(cat "$CREDENTIALS_DIRECTORY/tcms-vault")
+    echo "Loaded the tcms-vault credential"
+fi
+
 # Bind the various dirs we need for chroot to work
 readarray -t BIND_DIRS <<< $(bin/tpsgi-config --binds)
 for bind in "${BIND_DIRS[@]}"; do
