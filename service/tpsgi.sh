@@ -19,9 +19,9 @@ echo "tPSGI running with EGID $GROUP";
 #
 # The application is expected to take it back out of its own environment as it
 # starts, so that nothing it forks later inherits it.
-if [[ -n $CREDENTIALS_DIRECTORY && -r "$CREDENTIALS_DIRECTORY/tcms-vault" ]]; then
-    export TCMS_VAULT_KEY=$(cat "$CREDENTIALS_DIRECTORY/tcms-vault")
-    echo "Loaded the tcms-vault credential"
+if [[ -n ${CREDENTIALS_DIRECTORY:-} && -r "$CREDENTIALS_DIRECTORY/tpsgi-vault" ]]; then
+    export TPSGI_VAULT_KEY=$(cat "$CREDENTIALS_DIRECTORY/tpsgi-vault")
+    echo "Loaded the tpsgi-vault credential"
 fi
 
 # Bind the various dirs we need for chroot to work

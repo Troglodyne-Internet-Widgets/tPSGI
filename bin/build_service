@@ -1,15 +1,83 @@
-#!/bin/sh
+#!/bin/bash
 
-DOMAIN=$1
-REPLACEME=$(dirname $0)/..
-REPLACEME=$(readlink -f $REPLACEME)
+# Write the systemd unit for this application, and make sure it has a key to
+# hand it.
+#
+# Usage: bin/build_service [domain]
+
+set -u
+
+DOMAIN=${1:-}
+REPLACEME=$(dirname "$0")/..
+REPLACEME=$(readlink -f "$REPLACEME")
 # Make sure we start it with the *right* perl
 PERL5BIN=$(perl -V:scriptdir | sed -e "s/^scriptdir=//g;s/[';]//g")":$PATH"
+
+CREDENTIAL=tpsgi-vault
+# systemd reads this one, and /run/credstore.encrypted, and /usr/lib/... .  The
+# override is for a distribution that puts it somewhere else, and for testing
+# this without writing to /etc.
+CREDSTORE=${TPSGI_CREDSTORE:-/etc/credstore.encrypted}
+
+# An application which keeps secrets needs a key which is not kept where the
+# secrets are.  systemd's credential store is that place: root owned, decrypted
+# into a ramdisk only this service can read, and never anywhere a backup of the
+# application would pick it up.
+#
+# systemd-creds encrypt --with-key=auto seals to the TPM when there is one and
+# to the host key when there is not, so there is one command here rather than a
+# choice for somebody to get wrong.  What differs is how much a stolen disk
+# gets you, which is what gets reported below.
+#
+# Made once and then left alone.  Replacing it is the same as losing it: whatever
+# was sealed under the old one stops opening, and whoever stored it stores it
+# again.  That is the deal a key which lives and dies with its machine makes, and
+# it is the reason there is nothing here that writes one into $REPLACEME.
+setup_credential() {
+    if ! command -v systemd-creds > /dev/null; then
+        echo "No systemd-creds here, so no vault key.  Applications which wanted one will do without."
+        return 0
+    fi
+
+    local sealing
+    case "$(systemd-creds has-tpm2 2> /dev/null)" in
+        yes) sealing="sealed to this machine's TPM" ;;
+        *)   sealing="encrypted with the host key -- no usable TPM here, so a stolen disk is a stolen key" ;;
+    esac
+
+    sudo mkdir -p "$CREDSTORE" && sudo chmod 700 "$CREDSTORE" || {
+        echo "Could not make $CREDSTORE; skipping the vault key." >&2
+        return 1
+    }
+
+    # Asked as root, because the store is 700 and root owned: a plain -e in here
+    # cannot see into it and says the key is absent every single time.  That
+    # would quietly replace the key on every build_service, which is the same as
+    # losing it -- everything sealed under the old one stops opening.
+    if sudo test -e "$CREDSTORE/$CREDENTIAL"; then
+        echo "Vault key already in $CREDSTORE/$CREDENTIAL; leaving it alone."
+        return 0
+    fi
+
+    # Straight down a pipe and into systemd-creds: the key is never a file, an
+    # argument, or a line of scrollback on its way there.
+    if ! openssl rand -base64 32 \
+        | sudo systemd-creds encrypt --name="$CREDENTIAL" - "$CREDSTORE/$CREDENTIAL"; then
+        echo "Could not write $CREDSTORE/$CREDENTIAL; skipping the vault key." >&2
+        return 1
+    fi
+
+    sudo chmod 600 "$CREDSTORE/$CREDENTIAL"
+    echo "Wrote $CREDSTORE/$CREDENTIAL, $sealing."
+    echo "It is not backed up and cannot be recovered.  Losing this machine loses what was stored under it."
+}
+
+setup_credential
 
 sed -e "s|__REPLACEME__|$REPLACEME|g" \
     -e "s|__PERL5BIN__|$PERL5BIN|g" \
     -e "s|__DOMAIN__|$DOMAIN|g" \
-    -e "s|__HOME__|$UHOME|g" \
-    $REPLACEME/service/tpsgi.tmpl > $REPLACEME/service/tpsgi.service
+    -e "s|__HOME__|${UHOME:-}|g" \
+    "$REPLACEME/service/tpsgi.tmpl" > "$REPLACEME/service/tpsgi.service"
 
 echo "Wrote $REPLACEME/service/tpsgi.service"

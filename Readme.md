@@ -207,28 +207,31 @@ It's configured to start as root, then drop privs thanks to Net::Server's capabi
 
 An application often needs a key or a password that has no business living in
 its own checkout, where it would go into every backup alongside whatever it
-protects.  The unit imports those from systemd's credential store and
-service/tpsgi.sh hands them on.
+protects.  bin/build\_service makes one and puts it in systemd's credential
+store; the unit imports it and service/tpsgi.sh hands it on.
 
-Put one there, sealed to this machine so that the file is useless anywhere else:
-
-    openssl rand -base64 32 \
-      | sudo systemd-creds encrypt --name=tcms-vault - /etc/credstore.encrypted/tcms-vault
-
-...or unencrypted, if the machine has no TPM, in which case it is a root-owned
-file rather than a sealed one:
-
-    openssl rand -base64 32 | sudo tee /etc/credstore/tcms-vault > /dev/null
-    sudo chmod 600 /etc/credstore/tcms-vault
+You do not have to do anything for this.  build\_service writes
+`/etc/credstore.encrypted/tpsgi-vault` if it is not there already, encrypted
+with `systemd-creds --with-key=auto`: sealed to the TPM when the machine has a
+usable one, and to the host key when it does not.  It says which you got, since
+that is the difference between a stolen disk being useless and a stolen disk
+being a stolen key.  An existing key is left alone.
 
 systemd decrypts it into a ramdisk at `/run/credentials/$service` that only this
-service can read.  Nothing is written down in the unit, and nothing breaks if it
-is not there: `ImportCredential=` is quiet about a credential that does not
-exist, so an installation with no secrets to hand over starts normally.
+service can read.  Nothing breaks if it is not there: `ImportCredential=` is
+quiet about a credential that does not exist, so an installation whose
+application wants no secrets starts normally.
 
 The workers are chrooted into the application directory and that ramdisk is
 outside it, so service/tpsgi.sh reads the credential before the chroot happens
-and exports it -- `tcms-vault` becomes `TCMS_VAULT_KEY`.  An application taking
-one of these is expected to read it out of its environment as it starts and
-delete it there and then, so that nothing it forks afterwards inherits it.
+and exports it -- `tpsgi-vault` becomes `TPSGI_VAULT_KEY`.  An application taking
+one is expected to read it out of its environment as it starts and delete it
+there and then, so that nothing it forks afterwards inherits it.
 
+It is named for tPSGI rather than for whatever is being served, because this is
+tPSGI's unit and one service is one application in one directory.
+
+The key is not backed up and cannot be recovered.  That is deliberate: it lives
+and dies with the machine, so that it is never sitting in the same backup as the
+data it protects.  Rebuilding the host means whatever was sealed under it is
+gone and gets stored again.
