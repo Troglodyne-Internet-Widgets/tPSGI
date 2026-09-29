@@ -23,7 +23,7 @@ Obeys ~/.tpsgi.ini -- this is what will control all the custom aspects mentioned
     custom_log  : Custom location for default (rotated) log
     routers     : Router module(s), separate with comma.  Relative to TPSGI install dir.
     indices     : Dirindex files.  In addition to index.html, index.htm, index.cgi
-    loggers     : Logger module(s), separate with comma
+    loggers     : Logger module(s), separate with comma.  Each is a Log::Dispatch::Output class.  tPSGI loads it by name, so it can live beside a router
     auth        : Authentication module
     domain      : Domain name of the application, used by things like service files
     basedir     : Directory you want to chdir into on startup. Relative to TPSGI install dir.  Default '.'

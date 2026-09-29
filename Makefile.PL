@@ -36,6 +36,7 @@ WriteMakefile(
         "Linux::Perl::inotify" => "0",
         "List::Util" => "0",
         "Log::Dispatch" => "0",
+        "Module::Runtime" => "0",
         "Log::Dispatch::FileRotate" => "0",
         "Log::Dispatch::Screen" => "0",
         "Mojo::File" => "0",
@@ -51,6 +52,7 @@ WriteMakefile(
     TEST_REQUIRES => {
         "File::Temp" => "0",
         "Test2::V0"  => "0",
+        "Test2::Plugin::NoWarnings" => "0",
     },
     test => {TESTS => 't/*.t'}
 );
