@@ -35,6 +35,7 @@ use File::Copy;
 use Cwd qw{abs_path};
 
 use File::Basename qw{dirname basename};
+use Module::Runtime();
 use Log::Dispatch;
 use Log::Dispatch::Screen;
 use Log::Dispatch::FileRotate;
@@ -92,7 +93,11 @@ sub log {
     my $self = shift;
 
     state $log;
-    return $log if $log;
+    return $log //= $self->_build_log();
+}
+
+sub _build_log {
+    my $self = shift;
 
     my $LOGNAME = $self->{log_name};
     my $LOGDIR  = $self->{log_dir};
@@ -119,11 +124,14 @@ sub log {
         min_level => $LEVEL,
     );
 
-    $log = Log::Dispatch->new();
+    my $log = Log::Dispatch->new();
     $log->add($rotate);
     $log->add($screen);
+
+    # The first line is logged while new() is still loading the routers, so a
+    # logger that an application ships beside its router is not loaded yet.
     foreach my $logger ( @{ $self->{loggers} } ) {
-        $log->add( $logger->new( min_level => $LEVEL, log_dir => $LOGDIR ) );
+        $log->add( Module::Runtime::use_module($logger)->new( min_level => $LEVEL, log_dir => $LOGDIR ) );
     }
 
     $log->info( $self->_log("Opening Log $LOGNAME at $LEVEL level") );
