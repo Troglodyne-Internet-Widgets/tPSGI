@@ -581,15 +581,42 @@ my $cur_query = {};
 sub app {
     my $self = shift;
     return eval { _app( $self, @_ ) } || do {
+        my $err = $@;
         my $env = shift;
-        $env->{'psgi.errors'}->print($@) if $env->{'psgi.errors'};
+        $env->{'psgi.errors'}->print($err) if $env->{'psgi.errors'};
+
+        # psgi.errors is the server's stderr, which a daemonized server sends
+        # nowhere unless it was started with --error-log.  The log is the one
+        # place that is always there, so the reason goes in it whole.
+        $self->ERROR("Request failed: $err");
 
         # Redact the stack trace past line 1, it usually has things which should not be shown
-        $cur_query->{message} = $@;
+        $cur_query->{message} = $err;
         $cur_query->{message} =~ s/\n.*//g if $cur_query->{message} && !$debug;
 
         return $self->error($cur_query);
     };
+}
+
+=head2 cannot_start($error, $env, %options) = ARRAYREF
+
+What to answer with when new() died, so there is no object to answer with.
+Usually a router that would not load: a missing module, a syntax error.
+
+The error goes to psgi.errors, and to the log by way of a stand-in built from
+the same options, so it lands in the same places a request's own errors do.  If
+building the log is what failed -- a logger that will not load -- psgi.errors
+is all there is, and the answer is still a 500 rather than a second exception.
+
+=cut
+
+sub cannot_start {
+    my ( $error, $env, %options ) = @_;
+
+    $env->{'psgi.errors'}->print($error) if ref $env eq 'HASH' && $env->{'psgi.errors'};
+    eval { bless( { %options, ip => '0.0.0.0' }, __PACKAGE__ )->ERROR("Could not start: $error"); 1 };
+
+    return [ 500, [ $ct => $content_types{text} ], ['Internal Server Error'] ];
 }
 
 my %etags;
