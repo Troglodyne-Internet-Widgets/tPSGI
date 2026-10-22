@@ -42,8 +42,16 @@ for bind in "${BIND_DIRS[@]}"; do
     fi;
 done
 
+# Daemonizing points stderr at /dev/null, and stderr is where the server puts
+# whatever an application dies with.  --error-log points it at a file instead,
+# which the server opens before it chroots or drops privileges, so the path is
+# one outside the chroot.  It is the directory tPSGI's own log goes in, which
+# the workers write as $USERNAME, so that is who it is made for.
+LOG_DIR=$(bin/tpsgi-config --log_dir)
+[[ -d $LOG_DIR ]] || install -d -o "$USERNAME" -g "$GROUP" "$LOG_DIR"
+
 # We should obey the PATH set by this user, whose homedir is right here, ideally.
-bin/tarbaby --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --group "$GROUP" --daemonize --pid run/tpsgi.pid --chroot $(pwd) bin/tpsgi
+bin/tarbaby --listen run/tpsgi.sock --workers 20 --user "$USERNAME" --group "$GROUP" --daemonize --error-log "$LOG_DIR/error.log" --pid run/tpsgi.pid --chroot $(pwd) bin/tpsgi
 
 if [ $? -ne 0 ]
 then

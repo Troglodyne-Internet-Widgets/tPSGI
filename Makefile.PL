@@ -53,6 +53,7 @@ WriteMakefile(
         "File::Temp" => "0",
         "Test2::V0"  => "0",
         "Test2::Plugin::NoWarnings" => "0",
+        "Test::MockModule"          => "0",
     },
     test => {TESTS => 't/*.t'}
 );

@@ -60,6 +60,8 @@ our $app = sub {
     require Devel::NYTProf;
     mkdir "$options{tpsgi_dir}/prof";
 
-    my $self = TPSGI->new(%options);
+    # new() loads the routers, so a router that will not compile dies here,
+    # before app() can catch anything.
+    my $self = eval { TPSGI->new(%options) } or return TPSGI::cannot_start( $@, $_[0], %options );
     return $self->app(@_);
 };
