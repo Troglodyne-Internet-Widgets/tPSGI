@@ -637,7 +637,7 @@ sub cannot_start {
     }
 
     my $page = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Internal Server Error</title></head>"
-      . "<body><h1>Internal Server Error</h1><p>The application could not start.  The reason is in the server's log.</p>$detail</body></html>";
+      . "<body><h1>Internal Server Error</h1>$detail</body></html>";
 
     return [ 500, [ $ct => $content_types{html} ], [$page] ];
 }
