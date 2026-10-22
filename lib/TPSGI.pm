@@ -43,7 +43,7 @@ use Config::Simple;
 use TPSGI::Startup;
 
 # We have a DEBUG var which is plus ultra for extra sensitive stuff beyond just passing verbose
-my $debug = $ENV{TPSGI_DEBUG};
+our $debug = $ENV{TPSGI_DEBUG};
 
 #1MB chunks
 our $CHUNK_SEP  = 'perlfsSep666YOLO42069';
@@ -608,6 +608,18 @@ the same options, so it lands in the same places a request's own errors do.  If
 building the log is what failed -- a logger that will not load -- psgi.errors
 is all there is, and the answer is still a 500 rather than a second exception.
 
+The answer is a page of our own, not the router's error page: the router is
+what failed.  With TPSGI_DEBUG set it carries the error itself, trace and all,
+for the same reason _generic() adds one; without, it says nothing a visitor
+could use to map the installation.
+
+The worker retires once it has answered, on a server that offers
+psgix.harakiri, which Starman does.  A router that died while it compiled
+leaves its file in %INC as a failure, and every later require of it in this
+process says only "Attempt to reload ... aborted" -- so a load that failed
+once, to a race or a lock, would otherwise fail for every request the worker
+ever serves.  A fresh worker tries again from nothing.
+
 =cut
 
 sub cannot_start {
@@ -616,7 +628,18 @@ sub cannot_start {
     $env->{'psgi.errors'}->print($error) if ref $env eq 'HASH' && $env->{'psgi.errors'};
     eval { bless( { %options, ip => '0.0.0.0' }, __PACKAGE__ )->ERROR("Could not start: $error"); 1 };
 
-    return [ 500, [ $ct => $content_types{text} ], ['Internal Server Error'] ];
+    $env->{'psgix.harakiri.commit'} = 1 if ref $env eq 'HASH' && $env->{'psgix.harakiri'};
+
+    my $detail = '';
+    if ($debug) {
+        ( my $escaped = $error ) =~ s/([&<>"])/'&#' . ord($1) . ';'/ge;
+        $detail = "<pre>$escaped</pre>";
+    }
+
+    my $page = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Internal Server Error</title></head>"
+      . "<body><h1>Internal Server Error</h1><p>The application could not start.  The reason is in the server's log.</p>$detail</body></html>";
+
+    return [ 500, [ $ct => $content_types{html} ], [$page] ];
 }
 
 my %etags;
