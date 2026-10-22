@@ -73,6 +73,32 @@ subtest 'cannot_start' => sub {
     ok( lives { TPSGI::cannot_start( "no env\n", undef, %options ) }, 'a missing env is not a second failure' ) or note $@;
 };
 
+subtest 'cannot_start retires the worker' => sub {
+    my ( $env ) = fake_env();
+    $env->{'psgix.harakiri'} = 1;
+    TPSGI::cannot_start( "Could not load Bogus.pm!\n", $env, %options );
+    ok( $env->{'psgix.harakiri.commit'}, 'a server that can retire the worker is told to' );
+
+    ( $env ) = fake_env();
+    TPSGI::cannot_start( "Could not load Bogus.pm!\n", $env, %options );
+    ok( !exists $env->{'psgix.harakiri.commit'}, 'a server that cannot is not asked to' );
+};
+
+subtest 'cannot_start answers with a page' => sub {
+    my $error = "Could not load Bogus.pm!\nCan't locate <Bogus/Dep.pm> in \@INC & \"elsewhere\"\n";
+
+    my $res  = TPSGI::cannot_start( $error, ( fake_env() )[0], %options );
+    my %head = @{ $res->[1] };
+    is( $head{'Content-type'}, 'text/html', 'in HTML' );
+    like( $res->[2][0], qr/<h1>Internal Server Error<\/h1>/, 'saying what happened' );
+    unlike( $res->[2][0], qr/Bogus/, 'and, without TPSGI_DEBUG, not why' );
+
+    local $TPSGI::debug = 1;
+    $res = TPSGI::cannot_start( $error, ( fake_env() )[0], %options );
+    like( $res->[2][0], qr/Can't locate &#60;Bogus\/Dep\.pm&#62; in \@INC &#38; &#34;elsewhere&#34;/, 'with TPSGI_DEBUG, the error, escaped' );
+    unlike( $res->[2][0], qr/<Bogus/, 'none of it read as markup' );
+};
+
 subtest 'app, when the request dies' => sub {
     local @Test::Logger::Capture::lines;
     my ( $env, $written ) = fake_env();
