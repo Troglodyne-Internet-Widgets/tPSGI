@@ -32,7 +32,7 @@ Getopt::Long::GetOptions(
     "preload-app"      => \$preload_app,
 );
 
-my @args = (server => 'Starman', env => 'deployment', version_cb => \&version);
+my @args = (server => 'TPSGI', env => 'deployment', version_cb => \&version);
 if (!$preload_app) {
         push @args, 'loader' => 'Delayed';
 }
