@@ -45,7 +45,7 @@ our $app = sub {
 
     # Allow re-run
     if (%cfg) {
-        chdir( $cfg{tpsgi_dir} ) || warn "Can't chdir to $cfg{tpsgi_dir}: $_";
+        chdir( $cfg{tpsgi_dir} ) || warn "Can't chdir to $cfg{tpsgi_dir}: $!";
     }
 
     %cfg = TPSGI::get_config();
@@ -54,7 +54,7 @@ our $app = sub {
     $cfg{verbose} = 1;
 
     # Change your dir into whatever basedir you need to be in
-    chdir( $cfg{'basedir'} ) || warn "Can't chdir to $cfg{'basedir'}: $_";
+    chdir( $cfg{'basedir'} ) || warn "Can't chdir to $cfg{'basedir'}: $!";
 
     # If we have manually set the NYTPROF var, use it and don't try to control
     # When to stop or start it.
