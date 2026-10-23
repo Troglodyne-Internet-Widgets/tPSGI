@@ -36,6 +36,7 @@ use Log::Dispatch;
 use Log::Dispatch::Screen;
 use Log::Dispatch::FileRotate;
 use TPSGI::Startup;
+use TPSGI::Router;
 
 # We have a DEBUG var which is plus ultra for extra sensitive stuff beyond just passing verbose
 our $debug = $ENV{TPSGI_DEBUG};
@@ -222,9 +223,18 @@ sub FATAL {
 
 =head2 new(%options)
 
-Load the routers and build the routing table.  It dies unless it runs as
-C<user>, and C<http_user> and C<tpsgi_dir> are set.  get_config() returns the
-options, and among them are:
+Load the routers, and build the TPSGI::Router of their C<%openapi> documents.
+It dies unless it runs as C<user>, and C<http_user> and C<tpsgi_dir> are set.
+It also dies when a router does not load, when its document is not one that
+TPSGI::Router accepts, and when a router still defines C<@routes> instead of
+C<%openapi>.
+
+new() runs for every request, and compiling a document takes much longer than
+answering one.  So the router is built once in each worker, for each list of
+router files, and kept.  A HUP replaces the workers, so a changed router is
+compiled again.
+
+get_config() returns the options, and among them are:
 
     custom_log
     verbose
@@ -250,7 +260,7 @@ sub new {
     my $self = bless( \%options, $class );
     $self->{ip} = '0.0.0.0';
 
-    my @routes;
+    my @documents;
     my %aliases;
 
     # XXX TODO make these routes able to be fully qualified namespaces (::)!
@@ -269,15 +279,14 @@ sub new {
         $self->DEBUG("require $options{tpsgi_dir}/$route");
         my $success = eval { require "$options{tpsgi_dir}/$route"; 1; };    ## no critic (RequireBarewordIncludes) -- a router is named by its file
         if ($success) {
-            my ( $pkg_routes, $pkg_aliases, $pkg_watches ) = do {
+            my ( $pkg_openapi, $pkg_routes, $pkg_aliases, $pkg_watches ) = do {
                 no strict 'refs';                                           # the router's own package variables, by name
-                ( \@{"${package}::routes"}, \%{"${package}::aliases"}, \%{"${package}::watches"} );
+                ( \%{"${package}::openapi"}, \@{"${package}::routes"}, \%{"${package}::aliases"}, \%{"${package}::watches"} );
             };
 
-            for ( my $i = 0; $i < @$pkg_routes; $i += 2 ) {
-                $self->DEBUG("Registered route $pkg_routes->[$i]");
-            }
-            push( @routes, @$pkg_routes );
+            die "$route defines \@routes and no %openapi.  tPSGI routes by an OpenAPI 3 document now: see CUSTOM ROUTING in perldoc TPSGI.\n"
+              if @$pkg_routes && !%$pkg_openapi;
+            push( @documents, $route => $pkg_openapi ) if %$pkg_openapi;
 
             foreach my $al ( keys(%$pkg_aliases) ) {
                 $self->DEBUG("aliased route $al to $pkg_aliases->{$al}");
@@ -302,15 +311,17 @@ sub new {
         }
     }
 
-    # Set the pattern used to discover the route if needed later.
-    for ( my $i = 0; $i < scalar(@routes); $i += 2 ) {
-        $routes[ $i + 1 ]{pattern} = $routes[$i];
-    }
+    state %routers;
+    my $router_key = join( "\0", $options{tpsgi_dir}, @{ $self->{routers} } );
+    $self->{router} = $routers{$router_key} //= do {
+        my $router = TPSGI::Router->new(@documents);
+        $self->DEBUG("Registered route \U$_->{method}\E $_->{template}") foreach $router->routes();
+        $router;
+    };
 
     $self->{indices} //= [];
     $self->{indices} = [ @{ $self->{indices} }, qw{index.html index.htm index.cgi} ];
 
-    $self->{routes}    = \@routes;
     $self->{aliases}   = \%aliases;
     $self->{callbacks} = [];
 
@@ -329,16 +340,15 @@ sub indices {
     return $self->{indices};
 }
 
-=head2 routes() = ARRAYREF
+=head2 routes() = TPSGI::Router
 
-The routing table: each route's pattern, then its definition, for every router
-in the order they were loaded.
+The router that new() built from the C<%openapi> of every router.
 
 =cut
 
 sub routes {
     my $self = shift;
-    return $self->{routes};
+    return $self->{router};
 }
 
 =head2 serve($fullpath, $path, $start, $streaming, $ranges, $last_fetch, $deflate)
@@ -570,7 +580,7 @@ sub ok {
     return generic( $body, 200, $query );
 }
 
-=head2 notfound, forbidden, badrequest, toolong, error, unavailable
+=head2 notfound, forbidden, badrequest, notallowed, unsupported, toolong, error, unavailable
 
 If you need to return these HTTP errors, return these within a route:
 
@@ -601,6 +611,21 @@ sub badrequest {
     $self->INFO("$query->{method} 400 $query->{fullpath}");
     $body //= 'Bad Request';
     return generic( $body, 400, $query );
+}
+
+sub notallowed {
+    my ( $self, $query, @allow ) = @_;
+    $self->INFO("$query->{method} 405 $query->{fullpath}");
+    my $res = generic( 'Method Not Allowed', 405, $query );
+    push( @{ $res->[1] }, Allow => join( ', ', @allow ) ) if ref $res eq 'ARRAY';
+    return $res;
+}
+
+sub unsupported {
+    my ( $self, $query, $body ) = @_;
+    $self->INFO("$query->{method} 415 $query->{fullpath}");
+    $body //= 'Unsupported Media Type';
+    return generic( $body, 415, $query );
 }
 
 sub toolong {
@@ -701,19 +726,12 @@ sub cannot_start {
 
 my %etags;
 
-# A router's pattern means what the router wrote, so none of this file's
-# default flags apply to it: /aa would make \w ASCII only, /x would drop its
-# spaces, and /s would change what a dot matches.
-my sub match_route {
-    my ( $path, $pattern ) = @_;
-    no re '/aasx';
-    return $path =~ m/^$pattern$/;    ## no critic (RequireDefault RequireExtendedFormatting RequireDotMatchAnything)
-}
-
 =head2 respond($env) = PSGI response
 
 Answer one request: from a route when one matches, by running a CGI when the
-file under F<www/> is executable, and otherwise by serving the file.
+file under F<www/> is executable, and otherwise by serving the file.  A path
+that a route matches, with a method that no route of it has, gets
+notallowed().
 
 =cut
 
@@ -804,24 +822,8 @@ sub respond {
 
     my $streaming = $env->{'psgi.streaming'};
 
-    # If we have an actual route, just use it.
-    my $r           = $self->routes;
-    my $route_index = List::Util::first { ( $r->[$_] // '' ) eq $path } 0 .. scalar(@$r);
-
-    my $route_actual;
-    $route_actual = $r->[ $route_index + 1 ] if defined($route_index);
-
-    # Might be a regexed route. Sort reversed so we try the longest routes first.
-    if ( !$route_actual && @$r ) {
-        my $matched = List::Util::first {
-
-            # Here's where you want to use Regexp::Debugger in the context of call.pl to debug routes... EX:
-            # perl ./call.pl GET /path/to/route
-            match_route( $path, $r->[$_] );
-        }
-        0 .. scalar(@$r) - 1;
-        $route_actual = $r->[ $matched + 1 ] if defined($matched);
-    }
+    my $route_actual = $self->routes->match( $method, $path );
+    return $self->notallowed( $cur_query, @{ $route_actual->{allow} } ) if $route_actual && $route_actual->{status};
 
     if ($route_actual) {
         return $self->route(
@@ -924,10 +926,11 @@ sub appears_executable {
 
 =head2 route($route, $env, %request) = PSGI response
 
-Run the callback of $route that answers the request's content type, with the
-query that extract_query() builds.  respond() calls it, with %request holding
-C<fullpath>, C<path>, C<start>, C<last_fetch>, C<deflate>, C<domain> and
-C<port>.
+Run the callback of $route, which TPSGI::Router::match() returned, with the
+query that extract_query() builds.  In CGI mode, which C<x-tpsgi-env> asks
+for, the query is not built, and the callback gets the request as %ENV
+instead.  respond() calls route(), with %request holding C<fullpath>, C<path>,
+C<start>, C<last_fetch>, C<deflate>, C<domain> and C<port>.
 
 =cut
 
@@ -935,29 +938,18 @@ sub route {
     my ( $self, $route, $env, %request ) = @_;
     my ( $fullpath, $path, $start ) = @request{qw{fullpath path start}};
 
-    $self->DEBUG( 'Executing route ' . $route->{pattern} );
+    $self->DEBUG("Executing route \U$route->{method}\E $route->{template}");
 
-    $route->{method} = $env->{REQUEST_METHOD} if $route->{method} eq '*';
-    my $content_type = $env->{CONTENT_TYPE} || 'text/html';    # If not set, that's the assumption.
-    return $self->badrequest($cur_query) unless List::Util::any { $_ eq $env->{REQUEST_METHOD} } grep { defined $_ } ( 'HEAD', $route->{method} );
-
-    my $callback;
-    if ( exists $route->{callbacks}{'*'} ) {
-        $callback = $route->{callbacks}{'*'};
-    }
-    else {
-        return $self->badrequest($cur_query) unless exists $route->{callbacks}{$content_type};
-        $callback = $route->{callbacks}{$content_type};
-    }
-
+    my $operation = $route->{operation};
+    my $cgi_mode  = $operation->{'x-tpsgi-env'};
     my $streaming = $env->{'psgi.streaming'};
 
     # Build the query data for passing to a route.
-    # GET, POST, URI captures, then explicit data overrides.
+    # GET, POST, path parameters, then explicit data overrides.
     my $query = {};
 
     # If we're running in CGI mode, leave everything as-is.
-    $query = $self->extract_query( $path, $route, $env ) unless $route->{env};
+    $query = $self->extract_query( $path, $route, $env ) unless $cgi_mode;
 
     # We failed validation if $query isn't a hashref.
     return $query if ref $query eq 'ARRAY';
@@ -971,37 +963,37 @@ sub route {
     $query->{start}  = $start;
 
     # Put things to tv_interval in here for Server-Timing
-    $query->{fullpath}   = $fullpath;
-    $query->{method}     = $route->{method};
-    $query->{route}      = $path;
-    $query->{cookies}    = $env->{HTTP_COOKIE};
-    $query->{dnt}        = $env->{HTTP_DNT};
-    $query->{nosellinfo} = $env->{HTTP_SEC_GPC};
-    $query->{port}       = $request{port};
-    $query->{scheme}     = $env->{'psgi.url_scheme'} // 'http';
-    $query->{method}     = $env->{REQUEST_METHOD};
-    $query->{lang}       = $env->{HTTP_ACCEPT_LANGUAGE};
-    $query->{accept}     = $env->{HTTP_ACCEPT};
-    $query->{has_query}  = !!$env->{QUERY_STRING};
-    $query->{domain}     = $request{domain};
-    $query->{dispatcher} = $route;
-    $query->{ip}         = $cur_query->{ip};
-    $query->{ua}         = $cur_query->{ua};
-    $query->{referer}    = $cur_query->{referer};
+    $query->{fullpath}       = $fullpath;
+    $query->{route}          = $path;
+    $query->{route_template} = $route->{template};
+    $query->{cookies}        = $env->{HTTP_COOKIE};
+    $query->{dnt}            = $env->{HTTP_DNT};
+    $query->{nosellinfo}     = $env->{HTTP_SEC_GPC};
+    $query->{port}           = $request{port};
+    $query->{scheme}         = $env->{'psgi.url_scheme'} // 'http';
+    $query->{method}         = $env->{REQUEST_METHOD};
+    $query->{lang}           = $env->{HTTP_ACCEPT_LANGUAGE};
+    $query->{accept}         = $env->{HTTP_ACCEPT};
+    $query->{has_query}      = !!$env->{QUERY_STRING};
+    $query->{domain}         = $request{domain};
+    $query->{dispatcher}     = $operation;
+    $query->{ip}             = $cur_query->{ip};
+    $query->{ua}             = $cur_query->{ua};
+    $query->{referer}        = $cur_query->{referer};
 
     # This allows for better error handlers if we die in the route.
     $cur_query = $query;
 
     # Setup the CGI vars they expect IF requested
-    local %ENV = ( %ENV, CGI::Emulate::PSGI->emulate_environment($env) ) if $route->{env};
+    local %ENV = ( %ENV, CGI::Emulate::PSGI->emulate_environment($env) ) if $cgi_mode;
 
     # Emulate mod_unique_id
-    local $ENV{UNIQUE_ID} = UUID::uuid() if $route->{env};
+    local $ENV{UNIQUE_ID} = UUID::uuid() if $cgi_mode;
 
     # Run any watch callbacks, and make this a truly 'dynamic' application if requested.
     $self->handle_changes();
 
-    my $output = $callback->( $self, $query );
+    my $output = $route->{callback}->( $self, $query );
 
     # If it's streaming, just hand it off.
     # It's up to the caller to handle things like running post-close callbacks in this event.
@@ -1026,19 +1018,21 @@ sub route {
 =head2 extract_query($path, $route, $env) = HASHREF
 
 The query a route's callback is given: the query string, then the POST body,
-then the route's captures and its C<data>, each over the last.  When the route
-names C<parameters>, a parameter that fails its validator, or one it does not
-name, gets a badrequest() instead.
+then the path parameters of $route and the operation's C<x-tpsgi-data>, each
+over the last.  First TPSGI::Router::validate() checks the request against the
+operation.  A request that fails gets unsupported() for a 415 and badrequest()
+for a 400, and the reasons go to the log at the debug level.
 
 =cut
 
 sub extract_query {
     my ( $self, $path, $route, $env ) = @_;
 
-    my $query;
+    my $query = {};
     $query = URL::Encode::url_params_mixed( $env->{QUERY_STRING} ) if $env->{QUERY_STRING};
 
-    #Actually parse the POSTDATA and dump it into the QUERY object if this is a POST
+    #Actually parse the POSTDATA if this is a POST
+    my ( $form, $uploads );
     if ( $env->{REQUEST_METHOD} eq 'POST' ) {
 
         my $body = HTTP::Body->new( $env->{CONTENT_TYPE}, $env->{CONTENT_LENGTH} );
@@ -1046,45 +1040,33 @@ sub extract_query {
             $body->add($buf);
         }
 
-        @$query{ keys( %{ $body->param } ) }  = values( %{ $body->param } );
-        @$query{ keys( %{ $body->upload } ) } = values( %{ $body->upload } );
+        # A POST with no body has nothing for a requestBody schema to judge.
+        $form    = { %{ $body->param } } if $env->{CONTENT_TYPE} || $env->{CONTENT_LENGTH};
+        $uploads = $body->upload;
     }
 
-    if ( ref $route->{captures} eq 'ARRAY' ) {
-        my @captures = match_route( $path, $route->{pattern} );
-        @$query{ @{ $route->{captures} } } = @captures;
+    my ( $status, @errors ) = $self->routes->validate(
+        $route,
+        query        => $query,
+        body         => $form,
+        content_type => $env->{CONTENT_TYPE},
+        env          => $env,
+    );
+    if ($status) {
+        $self->DEBUG("Rejected $path: $_") foreach @errors;
+
+        # What respond() knows of the request, which the log line and the
+        # error page need.  The query has neither the method nor the path.
+        my $request = { method => $env->{REQUEST_METHOD}, fullpath => $path, %$cur_query };
+        return $status == 415 ? $self->unsupported($request) : $self->badrequest($request);
     }
 
-    if ( ref $route->{data} eq 'HASH' ) {
-        @$query{ keys( %{ $route->{data} } ) } = values( %{ $route->{data} } );
-    }
+    @$query{ keys(%$form) }                = values(%$form)    if $form;
+    @$query{ keys(%$uploads) }             = values(%$uploads) if $uploads;
+    @$query{ keys( %{ $route->{path} } ) } = values( %{ $route->{path} } );
 
-    # Now that we've parsed the query and know where we want to go,
-    # we should (optionally) murder everything the route does not explicitly want, and validate what it does
-    my $parameters = $route->{parameters};
-    if ( ref $parameters eq 'HASH' && %$parameters ) {
-        my @known_params = keys(%$parameters);
-        for my $param (@known_params) {
-            die "Invalid route definition for $path: parameter $param must correspond to a validation CODEREF." unless ref $parameters->{$param} eq 'CODE';
-
-            # A missing parameter is not necessarily a problem.
-            next unless $query->{$param};
-
-            # But if we have it, and it's bad, nack it, so that scanners get fail2banned.
-            $self->DEBUG("Rejected $path for bad query param $param");
-            return $self->badrequest($query) unless $parameters->{$param}->( $query->{$param} );
-        }
-
-        # Without this logging will break.
-        push( @known_params, qw{tpsgi ip ua user referer route dispatcher} );
-
-        # Smack down passing of unnecessary fields; this catches bugs
-        foreach my $field ( keys(%$query) ) {
-            next if List::Util::any { $field eq $_ } @known_params;
-            $self->WARN("Unexpected parameter $field passed");
-            return $self->badrequest($query);
-        }
-    }
+    my $data = $route->{operation}{'x-tpsgi-data'};
+    @$query{ keys(%$data) } = values(%$data) if ref $data eq 'HASH';
 
     return $query;
 }
@@ -1676,11 +1658,18 @@ __END__
 A router module, which C<routers> in F<~/.tpsgi.ini> names:
 
     package My::Routes;
+    use 5.040;
 
-    our @routes = (
-        '/hello' => {
-            method    => 'GET',
-            callbacks => { 'text/html' => \&hello },
+    our %openapi = (
+        openapi => '3.0.3',
+        info    => { title => 'My routes', version => '1' },
+        paths   => {
+            '/hello' => {
+                get => {
+                    'x-tpsgi-callback' => \&hello,
+                    responses          => { 200 => { description => 'A greeting' } },
+                },
+            },
         },
     );
 
@@ -1731,31 +1720,105 @@ All the CPAN deps should be updated out-of-band and the service manually restart
 
 =head1 CUSTOM ROUTING
 
-All passed routing modules will be required, and combined to form a routing table so you have an analogue to rewrite rules.
+tPSGI requires each router module, and routes requests by the OpenAPI 3
+document that each one exports as C<%openapi>.  A router can also export
+C<%aliases>, C<%watches> and C<generic_route()>.
 
-Routing Modules look like so:
+    package My::Routes;
+    use 5.040;
 
-    our @routes = (
-        '/foo/(\w+)/save' => {
-            method    => 'GET',
-            callbacks => { # Run these subroutines to execute the appropriate handler given the content-type.  Expects normal PSGI output.
-                'text/html'        => \&render,
-                'application/json' => \&dump,
+    our %openapi = (
+        openapi => '3.0.3',
+        info    => { title => 'My routes', version => '1' },
+        paths   => {
+            '/sitemap/{map}.xml' => {
+                get => {
+                    'x-tpsgi-callback' => \&sitemap,
+                    'x-myapp-nomap'    => true,
+                    parameters         => [
+                        {
+                            name     => 'map',
+                            in       => 'path',
+                            required => true,
+                            schema   => { type => 'integer' },
+                        },
+                    ],
+                    responses => { 200 => { description => 'One page of the sitemap' } },
+                },
             },
-            noindex   => 0, # Explicitly exclude this in robots.txt
-            nomap     => 0, # Don't put this in the sitemap
-            acls      => ['admin'], # Route requires both authentication by auth handler and the auth'd user to have the provided ACLs.
-            data      => { baz => 'throb' }, # Arbitrary data to inject into the GET/POST data hashref
-            captures  => ['name','parameter'], # Name parameters of the capture groups in the route key.  Suppose we want /foo/don/keys here.
-            static    => 1, # Whether we can save a static render of this
-            invalidates => ['/foo/(\w+)'], # Static renders which are invalidated by this route returning a successful response code.
+            '/lib/{module+}' => {
+                get => {
+                    'x-tpsgi-callback' => 'My::Routes::manual',
+                    'x-tpsgi-data'     => { section => 'manual' },
+                    parameters         => [
+                        {
+                            name     => 'module+',
+                            in       => 'path',
+                            required => true,
+                            schema   => { type => 'string' },
+                        },
+                    ],
+                    responses => { 200 => { description => 'The manual of a module' } },
+                },
+            },
         },
-        ...
     );
 
-Note that this is an array, as we want this to preserve order. Fat commas are used to hint that this is in fact a tuple.
+The document is Perl data.  A boolean in it is perl's own C<true> or C<false>,
+which C<use 5.040> imports, or a JSON boolean such as C<Cpanel::JSON::XS::true>.
+C<\1> is not a boolean, and fails the check against the OpenAPI schema.
 
-Router callbacks are passed the TPSGI object and the raw query, which means you can do:
+new() dies when a document is not valid, so a broken router fails as it loads,
+and not at the first request.  A router that still defines C<@routes> and no
+C<%openapi> dies the same way.
+
+=head2 Templates
+
+Each key of C<paths> is a template.  C<{name}> matches any text up to the next
+slash, and one segment can hold several variables and literal text, as in
+C<{map}.xml>.  C<{name+}> matches the rest of the path, slashes and all, and it
+must be the whole last segment.  Its parameter is named C<name+>, and the query
+gives its value as C<name>.  Any other character matches only itself.  No
+variable matches a newline.
+
+When more than one template matches, the most concrete one wins.  Literal
+segments win over segments with variables, segments that mix text and
+variables win over a lone C<{name}>, and C<{name+}> comes last.  Then the
+template with more literal characters wins, and then the one that sorts first.
+L<TPSGI::Router> says this in full.
+
+A path that a template matches, with a method that no matching template has,
+gets a 405 with an C<Allow> header.  HEAD uses the C<get> operation when there
+is no C<head> one.
+
+=head2 Operations
+
+The C<x-tpsgi-> keys of an operation are tPSGI's:
+
+    x-tpsgi-callback  The sub that answers the request: a CODE reference, or
+                      the fully qualified name of a sub.  Required.
+    x-tpsgi-data      A HASH, which is merged over the query.
+    x-tpsgi-env       True for CGI mode: the callback gets the request as a
+                      CGI %ENV, and no query is built.
+
+Any other C<x-> key is the application's.  The callback finds the whole
+operation in C<< $query->{dispatcher} >>, and the template that matched in
+C<< $query->{route_template} >>.
+
+=head2 Validation
+
+Before the callback runs, tPSGI checks the request against the operation's
+C<parameters> and C<requestBody>.  Values are coerced to their schema, so an
+integer arrives as a number.  A request that fails gets a 400, and the reasons
+go to the log at the debug level, not into the page.  The 400 is also the
+answer to a query key that the operation does not declare, when the operation
+declares a query parameter or a request body.  A form body is as strict as the
+C<additionalProperties> of its schema.  A body whose media type is not among
+the C<content> of the C<requestBody> gets a 415.
+
+=head2 Callbacks
+
+A callback is passed the TPSGI object and the query, which means you can do:
 
     sub route {
         my ($self, $query) = @_;
@@ -1763,7 +1826,8 @@ Router callbacks are passed the TPSGI object and the raw query, which means you 
         $self->ERROR("eeee");
         $self->DEBUG("blah");
 
-        # Either from the GET or POST data, POST is preferred when both are present.
+        # From the query string, the POST body, the path or x-tpsgi-data, in
+        # that order: a later one wins.
         my $param = $query->{param};
 
         my %headers = ...;

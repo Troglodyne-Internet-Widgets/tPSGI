@@ -141,20 +141,83 @@ subtest 'serve_ranges' => sub {
     close($fh) or die "Cannot close: $!";
 };
 
-# A router's pattern is matched as the router wrote it, whatever flags this
-# distribution's own regexes carry.
+# Writes a router module into $dir, and returns its name relative to $dir.
+sub write_router {
+    my ( $package, $body ) = @_;
+    Mojo::File->new("$dir/$package.pm")->spew("package $package;\nuse 5.040;\n$body\n1;\n");
+    return "$package.pm";
+}
+
+my %new_options = (
+    %options,
+    user      => scalar getpwuid($>),
+    http_user => scalar getgrgid( ( getpwuid($>) )[3] ),
+    tpsgi_dir => $dir,
+);
+
+subtest 'new' => sub {
+    my $stale = write_router( 'StaleRouter', q{our @routes = ( '/x' => { method => 'GET', callbacks => { '*' => sub { } } } );} );
+    like(
+        dies { TPSGI->new( %new_options, routers => [$stale] ) },
+        qr/StaleRouter[.]pm[ ]defines[ ]\@routes[ ]and[ ]no/,
+        'a router that still has @routes dies as it loads'
+    );
+
+    my $router = write_router( 'GoodRouter', <<~'ROUTER' );
+        our %openapi = (
+            openapi => '3.0.3',
+            info    => { title => 'good', version => '1' },
+            paths   => {
+                '/post/{slug}' => {
+                    get => {
+                        'x-tpsgi-callback' => sub { },
+                        'x-tpsgi-data'     => { from => 'data' },
+                        parameters         => [
+                            { name => 'slug',  in => 'path',  required => true, schema => { type => 'string' } },
+                            { name => 'limit', in => 'query', schema   => { type => 'integer' } },
+                        ],
+                        responses => { 200 => { description => 'ok' } },
+                    },
+                },
+            },
+        );
+        ROUTER
+    my $first = TPSGI->new( %new_options, routers => [$router] );
+    is( $first->routes->match( 'GET', '/post/hello' )->{template}, '/post/{slug}', 'a router with %openapi routes' );
+    ref_is( TPSGI->new( %new_options, routers => [$router] )->routes, $first->routes, 'and the next request in the worker reuses the router' );
+};
+
 subtest 'extract_query' => sub {
-    my $tpsgi = bless( { %options, ip => '0.0.0.0' }, 'TPSGI' );
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
     my $env   = { REQUEST_METHOD => 'GET' };
+    my $cafe  = "caf\N{LATIN SMALL LETTER E WITH ACUTE}";
 
-    my $query = $tpsgi->extract_query( "/post/caf\N{LATIN SMALL LETTER E WITH ACUTE}", { pattern => '/post/(\w+)', captures => ['slug'] }, $env );
-    is( $query->{slug}, "caf\N{LATIN SMALL LETTER E WITH ACUTE}", 'a \\w in a route matches a letter outside ASCII' );
+    my $query = $tpsgi->extract_query( "/post/$cafe", $tpsgi->routes->match( 'GET', "/post/$cafe" ), $env );
+    is( $query->{slug}, $cafe,  'a path parameter, outside ASCII too, is in the query' );
+    is( $query->{from}, 'data', 'and so is x-tpsgi-data' );
 
-    $query = $tpsgi->extract_query( '/a b/c', { pattern => '/a b/(\w+)', captures => ['name'] }, $env );
-    is( $query->{name}, 'c', 'and a space in a route is a space' );
+    $query = $tpsgi->extract_query( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'limit=5' } );
+    is( $query->{limit}, 5,   'the query string is in the query' );
+    is( $query->{slug},  'x', 'beside the path parameter' );
 
-    $query = $tpsgi->extract_query( "/note/x\ny", { pattern => '/note/(.+)', captures => ['text'] }, $env );
-    is( $query->{text}, undef, 'and a dot does not match a newline' );
+    local @Test::Logger::Capture::lines;
+    my $res = $tpsgi->extract_query( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'limit=many' } );
+    is( ref $res,  'ARRAY', 'a query that fails validation is an answer, not a query' );
+    is( $res->[0], 400,     'a 400' );
+    unlike( $res->[2][0], qr/integer/, 'which does not say why' );
+
+    $res = $tpsgi->extract_query( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'junk=1' } );
+    is( $res->[0], 400, 'and so is one with a key that the operation does not declare' );
+
+    $res = $tpsgi->extract_query( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'slug=y' } );
+    is( $res->[0], 400, 'even when the path declares it' );
+};
+
+subtest 'respond, with a method that the path does not have' => sub {
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
+    my $res   = $tpsgi->respond( { REQUEST_METHOD => 'POST', PATH_INFO => '/post/x', REQUEST_URI => '/post/x', HTTP_HOST => 'test.test' } );
+    is( $res->[0],                   405,         'is a 405' );
+    is( { @{ $res->[1] } }->{Allow}, 'GET, HEAD', 'which names the methods it has' );
 };
 
 done_testing();
