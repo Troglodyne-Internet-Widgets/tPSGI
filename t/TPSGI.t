@@ -1,15 +1,15 @@
-use strict;
-use warnings;
+#!/usr/bin/env perl
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aa';
 
 use Test2::V0;
 use Test2::Plugin::NoWarnings;
 
-use Cwd            qw{abs_path};
-use File::Temp     qw{tempdir};
-use File::Basename qw{dirname};
+use File::Temp qw{tempdir};
 use Test::MockModule;
 
-use lib dirname( abs_path(__FILE__) ) . '/../lib';
+use FindBin::libs;
 
 use TPSGI;
 
@@ -33,7 +33,7 @@ package Test::Logger::Capture {
         return;
     }
 }
-$INC{'Test/Logger/Capture.pm'} = __FILE__;
+local $INC{'Test/Logger/Capture.pm'} = __FILE__;
 
 my $dir     = tempdir( CLEANUP => 1 );
 my %options = (
@@ -44,7 +44,9 @@ my %options = (
 );
 
 sub fake_env {
-    open( my $errors, '>', \my $written ) or die "Cannot open a scalar: $!";
+
+    # The fake psgi.errors, which the caller keeps open.
+    open( my $errors, '>', \my $written ) or die "Cannot open a scalar: $!";    ## no critic (RequireBriefOpen)
     return ( { 'psgi.errors' => $errors }, \$written );
 }
 
@@ -54,11 +56,12 @@ sub fake_env {
 subtest 'cannot_start, when building the log is what failed' => sub {
     my ( $env, $written ) = fake_env();
     my $res;
-    ok( lives { $res = TPSGI::cannot_start( "Could not load Bogus.pm!\n", $env, %options, loggers => ['Bogus::Logger::That::Is::Not'] ) },
-        'a logger that will not load does not turn the 500 into an exception' )
-      or note $@;
+    ok(
+        lives { $res = TPSGI::cannot_start( "Could not load Bogus.pm!\n", $env, %options, loggers => ['Bogus::Logger::That::Is::Not'] ) },
+        'a logger that will not load does not turn the 500 into an exception'
+    ) or note $@;
     is( $res->[0], 500, 'it still answers 500' );
-    like( $$written, qr/Could not load Bogus\.pm/, 'and psgi.errors still gets the reason' );
+    like( $$written, qr/Could[ ]not[ ]load[ ]Bogus\.pm/xs, 'and psgi.errors still gets the reason' );
 };
 
 subtest 'cannot_start' => sub {
@@ -67,19 +70,20 @@ subtest 'cannot_start' => sub {
 
     my $res = TPSGI::cannot_start( "Could not load Bogus.pm!\nCan't locate Bogus/Dep.pm in \@INC\n", $env, %options );
     is( $res->[0], 500, 'answers 500' );
-    like( $$written,                       qr/Can't locate Bogus\/Dep\.pm/,                     'psgi.errors gets the whole reason' );
-    like( \@Test::Logger::Capture::lines, bag { item qr/Could not start: Could not load Bogus\.pm!\nCan't locate/; etc() }, 'and so does the log' );
+    like( $$written, qr/Can't[ ]locate[ ]Bogus\/Dep\.pm/xs, 'psgi.errors gets the whole reason' );
+    my $reason = qr/Could[ ]not[ ]load[ ]Bogus[.]pm!/xs;
+    like( \@Test::Logger::Capture::lines, bag { item qr/Could[ ]not[ ]start:[ ]$reason\nCan't[ ]locate/xs; etc() }, 'and so does the log' );
 
     ok( lives { TPSGI::cannot_start( "no env\n", undef, %options ) }, 'a missing env is not a second failure' ) or note $@;
 };
 
 subtest 'cannot_start retires the worker' => sub {
-    my ( $env ) = fake_env();
+    my ($env) = fake_env();
     $env->{'psgix.harakiri'} = 1;
     TPSGI::cannot_start( "Could not load Bogus.pm!\n", $env, %options );
     ok( $env->{'psgix.harakiri.commit'}, 'a server that can retire the worker is told to' );
 
-    ( $env ) = fake_env();
+    ($env) = fake_env();
     TPSGI::cannot_start( "Could not load Bogus.pm!\n", $env, %options );
     ok( !exists $env->{'psgix.harakiri.commit'}, 'a server that cannot is not asked to' );
 };
@@ -90,13 +94,14 @@ subtest 'cannot_start answers with a page' => sub {
     my $res  = TPSGI::cannot_start( $error, ( fake_env() )[0], %options );
     my %head = @{ $res->[1] };
     is( $head{'Content-type'}, 'text/html', 'in HTML' );
-    like( $res->[2][0], qr/<h1>Internal Server Error<\/h1>/, 'saying what happened' );
-    unlike( $res->[2][0], qr/Bogus/, 'and, without TPSGI_DEBUG, not why' );
+    like( $res->[2][0], qr/<h1>Internal[ ]Server[ ]Error<\/h1>/xs, 'saying what happened' );
+    unlike( $res->[2][0], qr/Bogus/xs, 'and, without TPSGI_DEBUG, not why' );
 
     local $TPSGI::debug = 1;
     $res = TPSGI::cannot_start( $error, ( fake_env() )[0], %options );
-    like( $res->[2][0], qr/Can't locate &#60;Bogus\/Dep\.pm&#62; in \@INC &#38; &#34;elsewhere&#34;/, 'with TPSGI_DEBUG, the error, escaped' );
-    unlike( $res->[2][0], qr/<Bogus/, 'none of it read as markup' );
+    my $escaped = q{Can't locate &#60;Bogus/Dep.pm&#62; in @INC &#38; &#34;elsewhere&#34;};
+    like( $res->[2][0], qr/\Q$escaped\E/xs, 'with TPSGI_DEBUG, the error, escaped' );
+    unlike( $res->[2][0], qr/<Bogus/xs, 'none of it read as markup' );
 };
 
 subtest 'app, when the request dies' => sub {
@@ -104,14 +109,30 @@ subtest 'app, when the request dies' => sub {
     my ( $env, $written ) = fake_env();
 
     my $mock = Test::MockModule->new( 'TPSGI', no_auto => 1 );
-    $mock->redefine( _app => sub { die "Can't locate Bogus/Dep.pm in \@INC\n" } );
+    $mock->redefine( respond => sub { die "Can't locate Bogus/Dep.pm in \@INC\n" } );
 
     my $tpsgi = bless( { %options, ip => '0.0.0.0' }, 'TPSGI' );
     my $res   = $tpsgi->app($env);
 
     is( $res->[0], 500, 'answers 500' );
-    like( $$written,                       qr/Can't locate Bogus\/Dep\.pm/,                                'psgi.errors gets the reason' );
-    like( \@Test::Logger::Capture::lines, bag { item qr/Request failed: Can't locate Bogus\/Dep\.pm/; etc() }, 'and so does the log, not just that a 500 happened' );
+    like( $$written,                      qr/Can't[ ]locate[ ]Bogus\/Dep\.pm/xs,                                         'psgi.errors gets the reason' );
+    like( \@Test::Logger::Capture::lines, bag { item qr/Request[ ]failed:[ ]Can't[ ]locate[ ]Bogus\/Dep\.pm/xs; etc() }, 'and so does the log, not just that a 500 happened' );
+};
+
+# A router's pattern is matched as the router wrote it, whatever flags this
+# distribution's own regexes carry.
+subtest 'extract_query' => sub {
+    my $tpsgi = bless( { %options, ip => '0.0.0.0' }, 'TPSGI' );
+    my $env   = { REQUEST_METHOD => 'GET' };
+
+    my $query = $tpsgi->extract_query( "/post/caf\N{LATIN SMALL LETTER E WITH ACUTE}", { pattern => '/post/(\w+)', captures => ['slug'] }, $env );
+    is( $query->{slug}, "caf\N{LATIN SMALL LETTER E WITH ACUTE}", 'a \\w in a route matches a letter outside ASCII' );
+
+    $query = $tpsgi->extract_query( '/a b/c', { pattern => '/a b/(\w+)', captures => ['name'] }, $env );
+    is( $query->{name}, 'c', 'and a space in a route is a space' );
+
+    $query = $tpsgi->extract_query( "/note/x\ny", { pattern => '/note/(.+)', captures => ['text'] }, $env );
+    is( $query->{text}, undef, 'and a dot does not match a newline' );
 };
 
 done_testing();

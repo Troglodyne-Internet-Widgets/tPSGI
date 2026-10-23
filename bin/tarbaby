@@ -1,8 +1,11 @@
 #!/usr/bin/env perl
 
-# Minor modifications to starman to support autoreload of code without Plack::Loader::Restarter.
+# PODNAME: tarbaby
+# ABSTRACT: starman, with the autoreload that tPSGI does without Plack::Loader::Restarter
 
-use strict;
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aa';
 
 use FindBin::libs;
 use Plack::Runner;
@@ -10,36 +13,49 @@ use Plack::Runner;
 use File::Basename qw{dirname};
 use TPSGI::Startup;
 
+=head1 USAGE
+
+    tarbaby [--preload-app] [starman options] bin/tpsgi
+
+Starman, run as plackup would run it, with the server that
+L<Plack::Handler::TPSGI> provides.  Before it forks, it sets up inotify watches
+on F<lib/> and on the directory of each router, so that a worker notices a
+changed module and restarts the server, when C<autoreload> is on.  The workers
+load the application when they start, unless C<--preload-app> is passed.
+
+=cut
+
 sub version {
     require Starman;
     print "Starman $Starman::VERSION\n";
+    return;
 }
 
 # Setup the watcher for changes
 # This has to be setup at global server start rather than app start per worker.
 # This is preferable to using -R (Plack::Loader::Restarter, see notes in orig starman)
 my %options = TPSGI::Startup::get_config();
-my @dirs = ("$options{tpsgi_dir}/lib");
-foreach my $route (@{$options{routers}}) {
-    push(@dirs, dirname("$options{tpsgi_dir}/$route"));
+my @dirs    = ("$options{tpsgi_dir}/lib");
+foreach my $route ( @{ $options{routers} } ) {
+    push( @dirs, dirname("$options{tpsgi_dir}/$route") );
 }
 TPSGI::Startup::watch_for_changes(@dirs);
 
 my $preload_app;
 require Getopt::Long;
-Getopt::Long::Configure("no_ignore_case", "no_auto_abbrev", "pass_through");
+Getopt::Long::Configure(qw{no_ignore_case no_auto_abbrev pass_through});
 Getopt::Long::GetOptions(
-    "preload-app"      => \$preload_app,
+    "preload-app" => \$preload_app,
 );
 
-my @args = (server => 'TPSGI', env => 'deployment', version_cb => \&version);
-if (!$preload_app) {
-        push @args, 'loader' => 'Delayed';
+my @args = ( server => 'TPSGI', env => 'deployment', version_cb => \&version );
+if ( !$preload_app ) {
+    push @args, 'loader' => 'Delayed';
 }
-my @argv = @ARGV;
+my @argv   = @ARGV;
 my $runner = Plack::Runner->new(@args);
 $runner->parse_options(@argv);
 
-$runner->set_options(argv => \@argv);
+$runner->set_options( argv => \@argv );
 $runner->run;
 

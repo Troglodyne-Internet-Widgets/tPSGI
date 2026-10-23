@@ -8,3 +8,15 @@ perl5/
 service/tpsgi.service*
 Makefile
 MYMETA*
+*.swp
+*.swo
+*.swn
+
+# Build leavings
+pm_to_blib
+blib/
+cover_db/
+.build
+# At the root, where dzil build leaves them.  Unanchored, the pattern also
+# hides a test named after the distribution, such as t/TPSGI-Server.t.
+/TPSGI-*

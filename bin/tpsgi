@@ -1,11 +1,12 @@
 #!bin/tarbaby
 
-#ABSTRACT: PSGI application which simplifies migrating legacy/cgi applications to PSGI, but also has advanced features for normal psgi apps
+# PODNAME: tpsgi
+# ABSTRACT: PSGI application which simplifies migrating legacy/cgi applications to PSGI, but also has advanced features for normal psgi apps
 
-use strict;
-use warnings;
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aa';
 
-use Cwd;
 use FindBin::libs;
 use File::Basename qw{dirname};
 
@@ -39,17 +40,17 @@ This is why the various paths asked for are relative to the tPSGI install dir.
 sub main {
     my (@args) = @_;
 
-    my %options = TPSGI::get_config();
-    foreach my $route (@{$options{routers}}) {
+    my %config = TPSGI::get_config();
+    foreach my $route ( @{ $config{routers} } ) {
         my $libdir = dirname($route);
-        push(@INC, $libdir);
+        push( @INC, $libdir );
     }
 
-    return %options;
+    return %config;
 }
 
 our $app = sub {
-    umask 0022;
+    umask 0o022;
 
     # Change your dir into whatever basedir you need to be in
     chdir("$options{tpsgi_dir}/$options{basedir}") or die "Can't chdir into $options{tpsgi_dir}/$options{'basedir'}: $!";
