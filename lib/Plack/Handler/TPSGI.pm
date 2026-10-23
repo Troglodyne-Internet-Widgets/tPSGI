@@ -4,7 +4,7 @@ package Plack::Handler::TPSGI;
 
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Plack::Handler::Starman};
 
@@ -27,7 +27,7 @@ sub run {
 
     my %nsa;
     foreach my $key ( keys %$self ) {
-        ( my $name = $key ) =~ s/^net_server_//xs or next;
+        ( my $name = $key ) =~ s/^net_server_// or next;
         $nsa{$name} = $self->{$key};
     }
     $self->{net_server_args} = \%nsa if %nsa;

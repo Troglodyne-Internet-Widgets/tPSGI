@@ -8,7 +8,7 @@ package TPSGI::Startup;
 
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Cwd;
 use File::Basename qw{dirname};
@@ -109,7 +109,7 @@ sub watch_for_changes {
         {
             wanted => sub {
                 my $object = $_;
-                push( @to_watch, $object ) if ( !-d $object && $object =~ m/[.]pm$/xs );
+                push( @to_watch, $object ) if ( !-d $object && $object =~ m/[.]pm$/ );
             },
             no_chdir => 1,
             bydepth  => 1,
@@ -323,7 +323,7 @@ sub pending_changes {
     foreach my $event ( $inotify->read() ) {
         my $watch   = $watches{ $event->{wd} };
         my $watched = $watch ? $watch->{path} : '';
-        $watched =~ s{/+$}{}xs;
+        $watched =~ s{/+$}{};
 
         # Directory watches tell us the entry which changed, file watches don't.
         my $path = $watched;

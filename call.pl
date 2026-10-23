@@ -3,7 +3,7 @@
 
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Data::Dumper;
 use FindBin::libs;
@@ -71,7 +71,7 @@ our $app = sub {
 
         # Redact the stack trace past line 1, it usually has things which should not be shown
         $self->{cur_query}->{message} = $@;
-        $self->{cur_query}->{message} =~ s/\n.*//gxs if $self->{cur_query}->{message};
+        $self->{cur_query}->{message} =~ s/\n.*//g if $self->{cur_query}->{message};
         return $self->error( $self->{cur_query} );
     };
 };

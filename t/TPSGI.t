@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Test2::V0;
 use Test2::Plugin::NoWarnings;
@@ -62,7 +62,7 @@ subtest 'cannot_start, when building the log is what failed' => sub {
         'a logger that will not load does not turn the 500 into an exception'
     ) or note $@;
     is( $res->[0], 500, 'it still answers 500' );
-    like( $$written, qr/Could[ ]not[ ]load[ ]Bogus\.pm/xs, 'and psgi.errors still gets the reason' );
+    like( $$written, qr/Could[ ]not[ ]load[ ]Bogus\.pm/, 'and psgi.errors still gets the reason' );
 };
 
 subtest 'cannot_start' => sub {
@@ -71,9 +71,9 @@ subtest 'cannot_start' => sub {
 
     my $res = TPSGI::cannot_start( "Could not load Bogus.pm!\nCan't locate Bogus/Dep.pm in \@INC\n", $env, %options );
     is( $res->[0], 500, 'answers 500' );
-    like( $$written, qr/Can't[ ]locate[ ]Bogus\/Dep\.pm/xs, 'psgi.errors gets the whole reason' );
-    my $reason = qr/Could[ ]not[ ]load[ ]Bogus[.]pm!/xs;
-    like( \@Test::Logger::Capture::lines, bag { item qr/Could[ ]not[ ]start:[ ]$reason\nCan't[ ]locate/xs; etc() }, 'and so does the log' );
+    like( $$written, qr/Can't[ ]locate[ ]Bogus\/Dep\.pm/, 'psgi.errors gets the whole reason' );
+    my $reason = qr/Could[ ]not[ ]load[ ]Bogus[.]pm!/;
+    like( \@Test::Logger::Capture::lines, bag { item qr/Could[ ]not[ ]start:[ ]$reason\nCan't[ ]locate/; etc() }, 'and so does the log' );
 
     ok( lives { TPSGI::cannot_start( "no env\n", undef, %options ) }, 'a missing env is not a second failure' ) or note $@;
 };
@@ -95,14 +95,14 @@ subtest 'cannot_start answers with a page' => sub {
     my $res  = TPSGI::cannot_start( $error, ( fake_env() )[0], %options );
     my %head = @{ $res->[1] };
     is( $head{'Content-type'}, 'text/html', 'in HTML' );
-    like( $res->[2][0], qr/<h1>Internal[ ]Server[ ]Error<\/h1>/xs, 'saying what happened' );
-    unlike( $res->[2][0], qr/Bogus/xs, 'and, without TPSGI_DEBUG, not why' );
+    like( $res->[2][0], qr/<h1>Internal[ ]Server[ ]Error<\/h1>/, 'saying what happened' );
+    unlike( $res->[2][0], qr/Bogus/, 'and, without TPSGI_DEBUG, not why' );
 
     local $TPSGI::debug = 1;
     $res = TPSGI::cannot_start( $error, ( fake_env() )[0], %options );
     my $escaped = q{Can't locate &#60;Bogus/Dep.pm&#62; in @INC &#38; &#34;elsewhere&#34;};
-    like( $res->[2][0], qr/\Q$escaped\E/xs, 'with TPSGI_DEBUG, the error, escaped' );
-    unlike( $res->[2][0], qr/<Bogus/xs, 'none of it read as markup' );
+    like( $res->[2][0], qr/\Q$escaped\E/, 'with TPSGI_DEBUG, the error, escaped' );
+    unlike( $res->[2][0], qr/<Bogus/, 'none of it read as markup' );
 };
 
 subtest 'app, when the request dies' => sub {
@@ -116,8 +116,8 @@ subtest 'app, when the request dies' => sub {
     my $res   = $tpsgi->app($env);
 
     is( $res->[0], 500, 'answers 500' );
-    like( $$written,                      qr/Can't[ ]locate[ ]Bogus\/Dep\.pm/xs,                                         'psgi.errors gets the reason' );
-    like( \@Test::Logger::Capture::lines, bag { item qr/Request[ ]failed:[ ]Can't[ ]locate[ ]Bogus\/Dep\.pm/xs; etc() }, 'and so does the log, not just that a 500 happened' );
+    like( $$written,                      qr/Can't[ ]locate[ ]Bogus\/Dep\.pm/,                                         'psgi.errors gets the reason' );
+    like( \@Test::Logger::Capture::lines, bag { item qr/Request[ ]failed:[ ]Can't[ ]locate[ ]Bogus\/Dep\.pm/; etc() }, 'and so does the log, not just that a 500 happened' );
 };
 
 subtest 'serve_ranges' => sub {
@@ -130,14 +130,14 @@ subtest 'serve_ranges' => sub {
 
     open( my $fh, '<', $file ) or die "Cannot read $file: $!";
     my $res = $tpsgi->serve_ranges( $fh, [ [ 0, 4 ] ], %args );
-    is( ref $res,                                                 'CODE', 'a range inside the file is streamed' );
-    is( [ grep { /GET[ ]416/xs } @Test::Logger::Capture::lines ], [],     'and not logged as a 416' );
+    is( ref $res,                                               'CODE', 'a range inside the file is streamed' );
+    is( [ grep { /GET[ ]416/ } @Test::Logger::Capture::lines ], [],     'and not logged as a 416' );
     close($fh) or die "Cannot close: $!";
 
     open( $fh, '<', $file ) or die "Cannot read $file: $!";
     $res = $tpsgi->serve_ranges( $fh, [ [ 0, 4 ], [ 20, 25 ] ], %args );
     is( $res->[0], 416, 'a range past the end is refused' );
-    like( \@Test::Logger::Capture::lines, bag { item qr/GET[ ]416[ ]\/ten-bytes/xs; etc() }, 'and logged as a 416' );
+    like( \@Test::Logger::Capture::lines, bag { item qr/GET[ ]416[ ]\/ten-bytes/; etc() }, 'and logged as a 416' );
     close($fh) or die "Cannot close: $!";
 };
 

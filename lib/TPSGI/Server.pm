@@ -4,7 +4,7 @@ package TPSGI::Server;
 
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Starman::Server};
 

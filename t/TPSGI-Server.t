@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Test2::V0;
 use Test2::Plugin::NoWarnings;
@@ -81,7 +81,7 @@ subtest 'every connection is answered while the parent is HUPed' => sub {
                 print {$c} "GET / HTTP/1.0\r\n\r\n";
                 my $got = do { local $/; <$c> }
                   // '';
-                $bad++ unless $got =~ m{^HTTP/1[.]\d[ ]200}xs;
+                $bad++ unless $got =~ m{^HTTP/1[.]\d[ ]200};
             }
             exit( $bad > 255 ? 255 : $bad );
         }

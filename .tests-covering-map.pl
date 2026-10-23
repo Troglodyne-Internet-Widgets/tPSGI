@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -65,12 +65,12 @@ return sub {
     my ($path) = @_;
 
     return q{} if $NO_TESTS{$path};
-    return q{} if $path =~ m{\A(?:git-hooks|[.]github|xt)/}sx;
-    return q{} if $path =~ m{[.]md\z}sx;
-    return q{} if $path =~ m{[.]pod\z}sx && $path !~ m{\Alib/}sx;
+    return q{} if $path =~ m{\A(?:git-hooks|[.]github|xt)/};
+    return q{} if $path =~ m{[.]md\z};
+    return q{} if $path =~ m{[.]pod\z} && $path !~ m{\Alib/};
 
     # The service's shell script and unit template, which no test runs.
-    return q{} if $path =~ m{\Aservice/}sx;
+    return q{} if $path =~ m{\Aservice/};
 
     return;
 };

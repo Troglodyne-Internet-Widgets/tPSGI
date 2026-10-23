@@ -4,7 +4,7 @@ package TPSGI;
 
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Carp::Always;
 
@@ -259,7 +259,7 @@ sub new {
         die "No such routing module $route" unless -e "$options{tpsgi_dir}/$route";
 
         # The router needs to exist and have nonzero numbers of routes.
-        my ($package) = basename($route) =~ m/(\S+)[.]pm$/xs;
+        my ($package) = basename($route) =~ m/(\S+)[.]pm$/;
 
         # It also should be a top-level namespace, not somewhere deep down. KISS.
         my $libdir = dirname("$options{tpsgi_dir}/$route");
@@ -415,7 +415,7 @@ sub serve {    ## no critic (ProhibitManyArgs) -- routers call it with these, in
 
         # Copy to the statics if it's not already there
         my $static_path = $path;
-        $static_path =~ s{^/*www/}{}xs;
+        $static_path =~ s{^/*www/}{};
         $static_path = "$self->{tpsgi_dir}/www/static/$static_path";
 
         my $target_dir = dirname($static_path);
@@ -648,7 +648,7 @@ sub app {
 
         # Redact the stack trace past line 1, it usually has things which should not be shown
         $cur_query->{message} = $err;
-        $cur_query->{message} =~ s/\n.*//gxs if $cur_query->{message} && !$debug;
+        $cur_query->{message} =~ s/\n.*//g if $cur_query->{message} && !$debug;
 
         return $self->error($cur_query);
     };
@@ -690,7 +690,7 @@ sub cannot_start {
 
     my $detail = '';
     if ($debug) {
-        ( my $escaped = $error ) =~ s/([&<>"])/'&#' . ord($1) . ';'/gexs;
+        ( my $escaped = $error ) =~ s/([&<>"])/'&#' . ord($1) . ';'/ge;
         $detail = "<pre>$escaped</pre>";
     }
 
@@ -706,7 +706,7 @@ my %etags;
 # spaces, and /s would change what a dot matches.
 my sub match_route {
     my ( $path, $pattern ) = @_;
-    no re '/aa';
+    no re '/aasx';
     return $path =~ m/^$pattern$/;    ## no critic (RequireDefault RequireExtendedFormatting RequireDotMatchAnything)
 }
 
@@ -738,7 +738,7 @@ sub respond {
     my $path   = $env->{PATH_INFO}             || '/';
 
     # de-pooplicate the path
-    $path =~ s{//}{/}gxs;
+    $path =~ s{//}{/}g;
 
     my $port   = $env->{HTTP_X_FORWARDED_PORT} // $env->{HTTP_PORT};
     my $pport  = defined $port ? ":$port" : "";
@@ -792,8 +792,8 @@ sub respond {
 
     # Figure out if we want compression or not
     my $alist = $env->{HTTP_ACCEPT_ENCODING} || '';
-    $alist =~ s/\s//gxs;
-    my @accept_encodings = split( /,/xs, $alist );
+    $alist =~ s/\s//g;
+    my @accept_encodings = split( /,/, $alist );
     my $deflate          = grep { 'gzip' eq $_ } @accept_encodings;
 
     # Set the IP of the request so we can fail2ban
@@ -846,7 +846,7 @@ sub respond {
         foreach my $index ( @{ $self->indices } ) {
             next if $file_actual;
             my $dirindex = $self->mangle_filename("www$path/$index");
-            $dirindex =~ s{//}{/}gxs;
+            $dirindex =~ s{//}{/}g;
             $file_actual = $dirindex if -e $dirindex && !-d _;
         }
     }
@@ -892,10 +892,10 @@ sub parse_ranges {
 
     my @ranges;
     if ($range) {
-        $range =~ s{bytes=}{}gxs;
+        $range =~ s{bytes=}{}g;
         push(
             @ranges,
-            map { [ split( /-/xs, $_ ) ]; } split( /,/xs, $range )
+            map { [ split( /-/, $_ ) ]; } split( /,/, $range )
         );
     }
     return @ranges;
@@ -916,7 +916,7 @@ sub appears_executable {
     # Definitely not executable if it does not exist!
     return 0 unless $subj;
     return 0 unless -x $subj;    ## no critic (ProhibitFiletest_rwxRWX) -- whether to run it, not whether we may
-    my ($extension) = $subj =~ m/[.](\S+)$/xs;
+    my ($extension) = $subj =~ m/[.](\S+)$/;
     return 1 if !$extension;
     return 1 if List::Util::any { $extension eq $_ } @executable_extensions;
     return 0;
@@ -1432,7 +1432,7 @@ sub save_render {
     return unless $path && $extension;
 
     # If this is an index, let's make it so
-    if ( $path =~ m{/$}xs ) {
+    if ( $path =~ m{/$} ) {
         $path = $path . 'index';
     }
 
@@ -1440,7 +1440,7 @@ sub save_render {
     $extension = $fixup{$extension} if exists $fixup{$extension};
 
     my $path_fixed = $path;
-    $path_fixed =~ s/[.]\Q$extension\E$//xs;
+    $path_fixed =~ s/[.]\Q$extension\E$//;
     $path_fixed = "$path_fixed.$extension";
 
     my $path2file = "$self->{tpsgi_dir}/www/static/" . dirname($path_fixed);
@@ -1475,7 +1475,7 @@ sub invalidate_render {
     $extension = $fixup{$extension} if exists $fixup{$extension};
 
     my $path_fixed = $path;
-    $path_fixed =~ s/[.]\Q$extension\E$//xs;
+    $path_fixed =~ s/[.]\Q$extension\E$//;
     $path_fixed = "$path_fixed.$extension";
 
     my $file = "$self->{tpsgi_dir}/www/static/$path_fixed";
@@ -1497,7 +1497,7 @@ sub invalidate_renders {
         {
             wanted => sub {
                 my $object = $_;
-                invalidate_file( $self, $object ) if ( !-d $object && $object =~ m/[.]\Q$extension\E$/xs );
+                invalidate_file( $self, $object ) if ( !-d $object && $object =~ m/[.]\Q$extension\E$/ );
             },
             no_chdir => 1,
             bydepth  => 1,
@@ -1589,7 +1589,7 @@ sub add_watch {
     };
     if ( !defined $wd ) {
         my $why = $@;
-        $why =~ s/\n.*//sx if $why;
+        $why =~ s/\n.*// if $why;
         $self->WARN("Could not watch $path for changes: $why");
         return undef;
     }
@@ -1634,11 +1634,11 @@ sub handle_changes {
         # A watch descriptor we know nothing about belongs to a worker which registered
         # watches we didn't.  All we can sensibly do with those is the old behavior.
         if ( !$watch ) {
-            $had_changes++ if $change->{path} =~ m/[.]pm$/xs;
+            $had_changes++ if $change->{path} =~ m/[.]pm$/;
             next;
         }
 
-        $had_changes++ if $watch->{restart} && $change->{path} =~ m/[.]pm$/xs;
+        $had_changes++ if $watch->{restart} && $change->{path} =~ m/[.]pm$/;
 
         foreach my $cb ( @{ $watch->{callbacks} } ) {
             local $@;

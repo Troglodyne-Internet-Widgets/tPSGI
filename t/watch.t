@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Test2::V0;
 

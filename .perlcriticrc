@@ -102,7 +102,7 @@ exclude_functions = print
 [RequireFatalWarnings]
 [ProhibitUnusedImports]
 # Modules imported for a side effect rather than for a symbol, which the policy
-# cannot see.  `re` is here because every file says `use re '/aa'`.  Add your
+# cannot see.  `re` is here because every file says `use re '/aasx'`.  Add your
 # own: IO::Prompter installs prompt() from a custom import rather than @EXPORT,
 # and anything loaded by name from a string is invisible the same way.
 # Test2::Plugin::NoWarnings fails a test that warns, and imports nothing.

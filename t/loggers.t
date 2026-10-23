@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Test2::V0;
 use Test2::Plugin::NoWarnings;
@@ -65,10 +65,10 @@ ok( lives { $tpsgi->log }, 'a logger class that nothing loaded is loaded by name
 no warnings 'once';
 is( $Test::Logger::Capture::given{log_dir},   $dir,   'it is handed the log directory' );
 is( $Test::Logger::Capture::given{min_level}, 'info', 'and the level' );
-like( \@Test::Logger::Capture::lines, [qr/Opening[ ]Log/xs], 'and it receives the lines that the file gets' );
+like( \@Test::Logger::Capture::lines, [qr/Opening[ ]Log/], 'and it receives the lines that the file gets' );
 
 # The name becomes a path to load, so only a module name is one.
 my $refusing = bless( { %$tpsgi, loggers => ['../../etc/passwd'] }, 'TPSGI' );
-like( dies { $refusing->build_log }, qr/not[ ]a[ ]module[ ]name/xs, 'a logger that is not a module name is refused' );
+like( dies { $refusing->build_log }, qr/not[ ]a[ ]module[ ]name/, 'a logger that is not a module name is refused' );
 
 done_testing();

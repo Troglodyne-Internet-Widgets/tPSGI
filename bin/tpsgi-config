@@ -7,7 +7,7 @@ package TPSGI::ConfigTool;
 
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
