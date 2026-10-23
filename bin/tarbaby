@@ -1,11 +1,11 @@
 #!/usr/bin/env perl
 
 # PODNAME: tarbaby
-# ABSTRACT: starman, with the autoreload that tPSGI does without Plack::Loader::Restarter
+# ABSTRACT: starman, with autoreload without Plack::Loader::Restarter, and restarts that drop no request
 
 use 5.040;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 use Plack::Runner;
@@ -18,10 +18,14 @@ use TPSGI::Startup;
     tarbaby [--preload-app] [starman options] bin/tpsgi
 
 Starman, run as plackup would run it, with the server that
-L<Plack::Handler::TPSGI> provides.  Before it forks, it sets up inotify watches
-on F<lib/> and on the directory of each router, so that a worker notices a
-changed module and restarts the server, when C<autoreload> is on.  The workers
-load the application when they start, unless C<--preload-app> is passed.
+L<Plack::Handler::TPSGI> provides.  On a HUP, that server's workers answer the
+connection they have accepted before they retire, so a restart drops no
+request.  See L<TPSGI::Server>.
+
+Before it forks, tarbaby sets up inotify watches on F<lib/> and on the
+directory of each router, so that a worker notices a changed module and
+restarts the server, when C<autoreload> is on.  The workers load the
+application when they start, unless C<--preload-app> is passed.
 
 =cut
 

@@ -196,7 +196,6 @@ and what it prints goes to the client.  The worker exits when it is done.
 
 Use when you just have a .cgi file you want to run without pipe-open.
 XXX this is extraordinarily unsafe, inefficient and kills workers.
-XXX it also has an 'apache-ism' of just assigning the HTTP status line for you.
 But sometimes you have to bite the bullet and do this to migrate stuff effectively.
 
 ## stream\_raw\_psgi($response, $query)
@@ -580,7 +579,7 @@ Current Maintainers:
 # CONTRIBUTORS
 
 - Andy Baugh <andy@troglodyne.net>
-- Kōan <morpheus@troglodyne.net>
+- troglodyne-bot <morpheus@troglodyne.net>
 
 # COPYRIGHT AND LICENSE
 
