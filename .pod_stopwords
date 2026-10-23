@@ -173,11 +173,13 @@ namespace
 nginx
 NIC
 NONINFRINGEMENT
+notallowed
 notfound
 NTP
 OAuth
 ok
 OOM
+OpenAPI
 overcommit
 overcommits
 overcommitted

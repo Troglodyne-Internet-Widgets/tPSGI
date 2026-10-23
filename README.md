@@ -12,11 +12,18 @@ A router module, which `routers` in `~/.tpsgi.ini` names:
 
 ```perl
 package My::Routes;
+use Mojo::JSON ();
 
-our @routes = (
-    '/hello' => {
-        method    => 'GET',
-        callbacks => { 'text/html' => \&hello },
+our %openapi = (
+    openapi => '3.0.3',
+    info    => { title => 'My routes', version => '1' },
+    paths   => {
+        '/hello' => {
+            get => {
+                'x-tpsgi-callback' => \&hello,
+                responses          => { 200 => { description => 'A greeting' } },
+            },
+        },
     },
 );
 
@@ -69,9 +76,18 @@ the user.  FATAL logs at the emergency level and then dies with the line.
 
 ## new(%options)
 
-Load the routers and build the routing table.  It dies unless it runs as
-`user`, and `http_user` and `tpsgi_dir` are set.  get\_config() returns the
-options, and among them are:
+Load the routers, and build the TPSGI::Router of their `%openapi` documents.
+It dies unless it runs as `user`, and `http_user` and `tpsgi_dir` are set.
+It also dies when a router does not load, when its document is not one that
+TPSGI::Router accepts, and when a router still defines `@routes` instead of
+`%openapi`.
+
+new() runs for every request, and compiling a document takes much longer than
+answering one.  So the router is built once in each worker, for each list of
+router files, and kept.  A HUP replaces the workers, so a changed router is
+compiled again.
+
+get\_config() returns the options, and among them are:
 
 ```
 custom_log
@@ -86,10 +102,9 @@ auth
 The directory index files, in the order they are tried: the `indices` option,
 then `index.html`, `index.htm` and `index.cgi`.
 
-## routes() = ARRAYREF
+## routes() = TPSGI::Router
 
-The routing table: each route's pattern, then its definition, for every router
-in the order they were loaded.
+The router that new() built from the `%openapi` of every router.
 
 ## serve($fullpath, $path, $start, $streaming, $ranges, $last\_fetch, $deflate)
 
@@ -111,7 +126,7 @@ Redirects to the provided page.
 
 Return a generic HTTP 200 OK
 
-## notfound, forbidden, badrequest, toolong, error, unavailable
+## notfound, forbidden, badrequest, notallowed, unsupported, toolong, error, unavailable
 
 If you need to return these HTTP errors, return these within a route:
 
@@ -153,7 +168,9 @@ ever serves.  A fresh worker tries again from nothing.
 ## respond($env) = PSGI response
 
 Answer one request: from a route when one matches, by running a CGI when the
-file under `www/` is executable, and otherwise by serving the file.
+file under `www/` is executable, and otherwise by serving the file.  A path
+that a route matches, with a method that no route of it has, gets
+notallowed().
 
 ## mangle\_filename($path) = STRING
 
@@ -172,17 +189,19 @@ and it has no extension or one of `cgi`, `sh`, `exe`, `pl`, `php` and `py`.
 
 ## route($route, $env, %request) = PSGI response
 
-Run the callback of $route that answers the request's content type, with the
-query that extract\_query() builds.  respond() calls it, with %request holding
-`fullpath`, `path`, `start`, `last_fetch`, `deflate`, `domain` and
-`port`.
+Run the callback of $route, which TPSGI::Router::match() returned, with the
+query that extract\_query() builds.  In CGI mode, which `x-tpsgi-env` asks
+for, the query is not built, and the callback gets the request as %ENV
+instead.  respond() calls route(), with %request holding `fullpath`, `path`,
+`start`, `last_fetch`, `deflate`, `domain` and `port`.
 
 ## extract\_query($path, $route, $env) = HASHREF
 
 The query a route's callback is given: the query string, then the POST body,
-then the route's captures and its `data`, each over the last.  When the route
-names `parameters`, a parameter that fails its validator, or one it does not
-name, gets a badrequest() instead.
+then the path parameters of $route and the operation's `x-tpsgi-data`, each
+over the last.  First TPSGI::Router::validate() checks the request against the
+operation.  A request that fails gets unsupported() for a 415 and badrequest()
+for a 400, and the reasons go to the log at the debug level.
 
 ## cgi($env, $fullpath, $file\_actual, $last\_fetch) = PSGI response
 
@@ -358,33 +377,110 @@ All the CPAN deps should be updated out-of-band and the service manually restart
 
 # CUSTOM ROUTING
 
-All passed routing modules will be required, and combined to form a routing table so you have an analogue to rewrite rules.
-
-Routing Modules look like so:
+tPSGI requires each router module, and routes requests by the OpenAPI 3
+document that each one exports as `%openapi`.  A router can also export
+`%aliases`, `%watches` and `generic_route()`.
 
 ```perl
-our @routes = (
-    '/foo/(\w+)/save' => {
-        method    => 'GET',
-        callbacks => { # Run these subroutines to execute the appropriate handler given the content-type.  Expects normal PSGI output.
-            'text/html'        => \&render,
-            'application/json' => \&dump,
+package My::Routes;
+use Mojo::JSON ();
+
+our %openapi = (
+    openapi => '3.0.3',
+    info    => { title => 'My routes', version => '1' },
+    paths   => {
+        '/sitemap/{map}.xml' => {
+            get => {
+                'x-tpsgi-callback' => \&sitemap,
+                'x-myapp-nomap'    => Mojo::JSON::true,
+                parameters         => [
+                    {
+                        name     => 'map',
+                        in       => 'path',
+                        required => Mojo::JSON::true,
+                        schema   => { type => 'integer' },
+                    },
+                ],
+                responses => { 200 => { description => 'One page of the sitemap' } },
+            },
         },
-        noindex   => 0, # Explicitly exclude this in robots.txt
-        nomap     => 0, # Don't put this in the sitemap
-        acls      => ['admin'], # Route requires both authentication by auth handler and the auth'd user to have the provided ACLs.
-        data      => { baz => 'throb' }, # Arbitrary data to inject into the GET/POST data hashref
-        captures  => ['name','parameter'], # Name parameters of the capture groups in the route key.  Suppose we want /foo/don/keys here.
-        static    => 1, # Whether we can save a static render of this
-        invalidates => ['/foo/(\w+)'], # Static renders which are invalidated by this route returning a successful response code.
+        '/lib/{module+}' => {
+            get => {
+                'x-tpsgi-callback' => 'My::Routes::manual',
+                'x-tpsgi-data'     => { section => 'manual' },
+                parameters         => [
+                    {
+                        name     => 'module+',
+                        in       => 'path',
+                        required => Mojo::JSON::true,
+                        schema   => { type => 'string' },
+                    },
+                ],
+                responses => { 200 => { description => 'The manual of a module' } },
+            },
+        },
     },
-    ...
 );
 ```
 
-Note that this is an array, as we want this to preserve order. Fat commas are used to hint that this is in fact a tuple.
+The document is Perl data.  A boolean in it must be `Mojo::JSON::true` or
+`Mojo::JSON::false`.  `\1` and `builtin::true` fail the check against the
+OpenAPI schema.  Write the full name: `use 5.040` imports `builtin::true` as
+`true`, and that wins over an imported `Mojo::JSON::true`.
 
-Router callbacks are passed the TPSGI object and the raw query, which means you can do:
+new() dies when a document is not valid, so a broken router fails as it loads,
+and not at the first request.  A router that still defines `@routes` and no
+`%openapi` dies the same way.
+
+## Templates
+
+Each key of `paths` is a template.  `{name}` matches any text up to the next
+slash, and one segment can hold several variables and literal text, as in
+`{map}.xml`.  `{name+}` matches the rest of the path, slashes and all, and it
+must be the whole last segment.  Its parameter is named `name+`, and the query
+gives its value as `name`.  Any other character matches only itself.  No
+variable matches a newline.
+
+When more than one template matches, the most concrete one wins.  Literal
+segments win over segments with variables, segments that mix text and
+variables win over a lone `{name}`, and `{name+}` comes last.  Then the
+template with more literal characters wins, and then the one that sorts first.
+[TPSGI::Router](https://metacpan.org/pod/TPSGI%3A%3ARouter) says this in full.
+
+A path that a template matches, with a method that no matching template has,
+gets a 405 with an `Allow` header.  HEAD uses the `get` operation when there
+is no `head` one.
+
+## Operations
+
+The `x-tpsgi-` keys of an operation are tPSGI's:
+
+```perl
+x-tpsgi-callback  The sub that answers the request: a CODE reference, or
+                  the fully qualified name of a sub.  Required.
+x-tpsgi-data      A HASH, which is merged over the query.
+x-tpsgi-env       True for CGI mode: the callback gets the request as a
+                  CGI %ENV, and no query is built.
+```
+
+Any other `x-` key is the application's.  The callback finds the whole
+operation in `$query->{dispatcher}`, and the template that matched in
+`$query->{route_template}`.
+
+## Validation
+
+Before the callback runs, tPSGI checks the request against the operation's
+`parameters` and `requestBody`.  Values are coerced to their schema, so an
+integer arrives as a number.  A request that fails gets a 400, and the reasons
+go to the log at the debug level, not into the page.  The 400 is also the
+answer to a query key that the operation does not declare, when the operation
+declares a query parameter or a request body.  A form body is as strict as the
+`additionalProperties` of its schema.  A body whose media type is not among
+the `content` of the `requestBody` gets a 415.
+
+## Callbacks
+
+A callback is passed the TPSGI object and the query, which means you can do:
 
 ```perl
 sub route {
@@ -393,7 +489,8 @@ sub route {
     $self->ERROR("eeee");
     $self->DEBUG("blah");
 
-    # Either from the GET or POST data, POST is preferred when both are present.
+    # From the query string, the POST body, the path or x-tpsgi-data, in
+    # that order: a later one wins.
     my $param = $query->{param};
 
     my %headers = ...;

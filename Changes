@@ -2,3 +2,8 @@ Revision history for TPSGI
 
 0.001 2026-10-23 TEODESIAN
     - Initial Release
+    - Route by an OpenAPI 3 document: a router exports %openapi in place of
+      @routes, and a router that still has @routes dies as it loads.
+      Templates take {name} and a final {name+}, the most concrete template
+      wins, and parameters are validated and coerced by JSON::Validator.
+      A path with a method that it has no route for is a 405, not a 400.
