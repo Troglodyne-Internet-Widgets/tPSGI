@@ -7,6 +7,7 @@ use Test2::V0;
 use Test2::Plugin::NoWarnings;
 
 use File::Temp qw{tempdir};
+use Mojo::File ();
 use Test::MockModule;
 
 use FindBin::libs;
@@ -117,6 +118,27 @@ subtest 'app, when the request dies' => sub {
     is( $res->[0], 500, 'answers 500' );
     like( $$written,                      qr/Can't[ ]locate[ ]Bogus\/Dep\.pm/xs,                                         'psgi.errors gets the reason' );
     like( \@Test::Logger::Capture::lines, bag { item qr/Request[ ]failed:[ ]Can't[ ]locate[ ]Bogus\/Dep\.pm/xs; etc() }, 'and so does the log, not just that a 500 happened' );
+};
+
+subtest 'serve_ranges' => sub {
+    local @Test::Logger::Capture::lines;
+    my $tpsgi = bless( { %options, ip => '0.0.0.0' }, 'TPSGI' );
+
+    my $file = "$dir/ten-bytes";
+    Mojo::File->new($file)->spew('0123456789');
+    my %args = ( size => 10, headers => { 'Content-type' => 'text/plain' }, fullpath => '/ten-bytes' );
+
+    open( my $fh, '<', $file ) or die "Cannot read $file: $!";
+    my $res = $tpsgi->serve_ranges( $fh, [ [ 0, 4 ] ], %args );
+    is( ref $res,                                                 'CODE', 'a range inside the file is streamed' );
+    is( [ grep { /GET[ ]416/xs } @Test::Logger::Capture::lines ], [],     'and not logged as a 416' );
+    close($fh) or die "Cannot close: $!";
+
+    open( $fh, '<', $file ) or die "Cannot read $file: $!";
+    $res = $tpsgi->serve_ranges( $fh, [ [ 0, 4 ], [ 20, 25 ] ], %args );
+    is( $res->[0], 416, 'a range past the end is refused' );
+    like( \@Test::Logger::Capture::lines, bag { item qr/GET[ ]416[ ]\/ten-bytes/xs; etc() }, 'and logged as a 416' );
+    close($fh) or die "Cannot close: $!";
 };
 
 # A router's pattern is matched as the router wrote it, whatever flags this

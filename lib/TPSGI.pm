@@ -474,8 +474,10 @@ sub serve_ranges {
     # Calculate the content-length up-front.  We have to fix unspecified lengths first, and reject bad requests.
     foreach my $range (@$ranges) {
         $range->[1] //= $sz - 1;
-        $self->INFO("GET 416 $fullpath");
-        return [ 416, [%headers], ["Requested range not satisfiable"] ] if $range->[0] > $sz || $range->[0] < 0 || $range->[1] < 0 || $range->[0] > $range->[1];
+        if ( $range->[0] > $sz || $range->[0] < 0 || $range->[1] < 0 || $range->[0] > $range->[1] ) {
+            $self->INFO("GET 416 $fullpath");
+            return [ 416, [%headers], ["Requested range not satisfiable"] ];
+        }
     }
     $headers{'Content-Length'} = List::Util::sum( map { $_->[1] + 1 - $_->[0] } @$ranges );
 
