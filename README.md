@@ -12,7 +12,7 @@ A router module, which `routers` in `~/.tpsgi.ini` names:
 
 ```perl
 package My::Routes;
-use Mojo::JSON ();
+use 5.040;
 
 our %openapi = (
     openapi => '3.0.3',
@@ -383,7 +383,7 @@ document that each one exports as `%openapi`.  A router can also export
 
 ```perl
 package My::Routes;
-use Mojo::JSON ();
+use 5.040;
 
 our %openapi = (
     openapi => '3.0.3',
@@ -392,12 +392,12 @@ our %openapi = (
         '/sitemap/{map}.xml' => {
             get => {
                 'x-tpsgi-callback' => \&sitemap,
-                'x-myapp-nomap'    => Mojo::JSON::true,
+                'x-myapp-nomap'    => true,
                 parameters         => [
                     {
                         name     => 'map',
                         in       => 'path',
-                        required => Mojo::JSON::true,
+                        required => true,
                         schema   => { type => 'integer' },
                     },
                 ],
@@ -412,7 +412,7 @@ our %openapi = (
                     {
                         name     => 'module+',
                         in       => 'path',
-                        required => Mojo::JSON::true,
+                        required => true,
                         schema   => { type => 'string' },
                     },
                 ],
@@ -423,10 +423,9 @@ our %openapi = (
 );
 ```
 
-The document is Perl data.  A boolean in it must be `Mojo::JSON::true` or
-`Mojo::JSON::false`.  `\1` and `builtin::true` fail the check against the
-OpenAPI schema.  Write the full name: `use 5.040` imports `builtin::true` as
-`true`, and that wins over an imported `Mojo::JSON::true`.
+The document is Perl data.  A boolean in it is perl's own `true` or `false`,
+which `use 5.040` imports, or a JSON boolean such as `Cpanel::JSON::XS::true`.
+`\1` is not a boolean, and fails the check against the OpenAPI schema.
 
 new() dies when a document is not valid, so a broken router fails as it loads,
 and not at the first request.  A router that still defines `@routes` and no

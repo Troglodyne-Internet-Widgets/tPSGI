@@ -9,6 +9,7 @@ use re '/aasx';
 use List::Util ();
 use JSON::Validator::Schema::OpenAPIv3;
 use JSON::Validator::Util ();
+use Cpanel::JSON::XS      ();
 
 =head1 SYNOPSIS
 
@@ -102,6 +103,44 @@ sub new {
     return $self;
 }
 
+=head2 json_booleans($data) = copy
+
+A copy of $data in which each of perl's own booleans, such as the C<true> that
+C<use 5.040> gives a router, is a Cpanel::JSON::XS boolean.  JSON::Validator
+5.19 compares C<enum> values by a checksum, so a native true does not equal
+the true of the OpenAPI schema, and C<required =E<gt> true> fails.  Hashes and
+arrays are copied.  Every other reference is kept, so a callback stays the
+same sub.
+
+=cut
+
+sub json_booleans {
+    my ($data) = @_;
+    no warnings qw{experimental::builtin};
+
+    # Each job is the place a copy goes, and what to copy there.
+    my $copy;
+    my @todo = ( [ \$copy, $data ] );
+    while ( my $job = shift @todo ) {
+        my ( $slot, $value ) = @$job;
+        if ( ref $value eq 'HASH' ) {
+            $$slot = {};
+            push( @todo, map { [ \$$slot->{$_}, $value->{$_} ] } keys(%$value) );
+        }
+        elsif ( ref $value eq 'ARRAY' ) {
+            $$slot = [];
+            push( @todo, map { [ \$$slot->[$_], $value->[$_] ] } 0 .. $#$value );
+        }
+        elsif ( !ref $value && builtin::is_bool($value) ) {
+            $$slot = $value ? Cpanel::JSON::XS::true : Cpanel::JSON::XS::false;
+        }
+        else {
+            $$slot = $value;
+        }
+    }
+    return $copy;
+}
+
 =head2 add_document($name, $document)
 
 Check $document as OpenAPI 3, and add each of its operations.  new() calls it
@@ -114,7 +153,7 @@ sub add_document {
 
     die "$name: the router's %openapi is not a HASH reference\n" unless ref $document eq 'HASH';
 
-    my $schema = JSON::Validator::Schema::OpenAPIv3->new($document);
+    my $schema = JSON::Validator::Schema::OpenAPIv3->new( json_booleans($document) );
     my @errors = @{ $schema->errors };
     die "$name: %openapi is not a valid OpenAPI 3 document:\n" . join( "\n", map { "  $_" } @errors ) . "\n" if @errors;
 

@@ -1658,7 +1658,7 @@ __END__
 A router module, which C<routers> in F<~/.tpsgi.ini> names:
 
     package My::Routes;
-    use Mojo::JSON ();
+    use 5.040;
 
     our %openapi = (
         openapi => '3.0.3',
@@ -1725,7 +1725,7 @@ document that each one exports as C<%openapi>.  A router can also export
 C<%aliases>, C<%watches> and C<generic_route()>.
 
     package My::Routes;
-    use Mojo::JSON ();
+    use 5.040;
 
     our %openapi = (
         openapi => '3.0.3',
@@ -1734,12 +1734,12 @@ C<%aliases>, C<%watches> and C<generic_route()>.
             '/sitemap/{map}.xml' => {
                 get => {
                     'x-tpsgi-callback' => \&sitemap,
-                    'x-myapp-nomap'    => Mojo::JSON::true,
+                    'x-myapp-nomap'    => true,
                     parameters         => [
                         {
                             name     => 'map',
                             in       => 'path',
-                            required => Mojo::JSON::true,
+                            required => true,
                             schema   => { type => 'integer' },
                         },
                     ],
@@ -1754,7 +1754,7 @@ C<%aliases>, C<%watches> and C<generic_route()>.
                         {
                             name     => 'module+',
                             in       => 'path',
-                            required => Mojo::JSON::true,
+                            required => true,
                             schema   => { type => 'string' },
                         },
                     ],
@@ -1764,10 +1764,9 @@ C<%aliases>, C<%watches> and C<generic_route()>.
         },
     );
 
-The document is Perl data.  A boolean in it must be C<Mojo::JSON::true> or
-C<Mojo::JSON::false>.  C<\1> and C<builtin::true> fail the check against the
-OpenAPI schema.  Write the full name: C<use 5.040> imports C<builtin::true> as
-C<true>, and that wins over an imported C<Mojo::JSON::true>.
+The document is Perl data.  A boolean in it is perl's own C<true> or C<false>,
+which C<use 5.040> imports, or a JSON boolean such as C<Cpanel::JSON::XS::true>.
+C<\1> is not a boolean, and fails the check against the OpenAPI schema.
 
 new() dies when a document is not valid, so a broken router fails as it loads,
 and not at the first request.  A router that still defines C<@routes> and no

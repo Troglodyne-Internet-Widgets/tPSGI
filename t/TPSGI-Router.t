@@ -8,6 +8,8 @@ use Test2::Plugin::NoWarnings;
 
 use Mojo::JSON ();
 
+use Cpanel::JSON::XS ();
+
 use FindBin::libs;
 
 use TPSGI::Router;
@@ -18,7 +20,7 @@ sub coderef { return 'coderef' }
 
 sub path_parameter {
     my ( $name, %schema ) = @_;
-    return { name => $name, in => 'path', required => Mojo::JSON::true, schema => { type => 'string', %schema } };
+    return { name => $name, in => 'path', required => true, schema => { type => 'string', %schema } };
 }
 
 sub operation {
@@ -48,7 +50,7 @@ my $router = TPSGI::Router->new(
                         'application/x-www-form-urlencoded' => {
                             schema => {
                                 type                 => 'object',
-                                additionalProperties => Mojo::JSON::false,
+                                additionalProperties => false,
                                 properties           => { count => { type => 'integer' } },
                             },
                         },
@@ -114,6 +116,21 @@ subtest 'callbacks' => sub {
         qr/no_such_sub,[ ]which[ ]is[ ]not[ ]a[ ]defined/,
         'and so does a name that is not a sub'
     );
+};
+
+subtest 'booleans' => sub {
+    my $json = { %{ path_parameter('x') }, required => Cpanel::JSON::XS::true };
+    ok(
+        lives { TPSGI::Router->new( 'Json.pm' => document( '/j/{x}' => { get => operation( parameters => [$json] ) } ) ) },
+        'a JSON boolean is a boolean'
+    ) or note $@;
+
+    # $router's own document marks its path parameters required with perl's own true.
+    is( $router->match( 'GET', '/post/a' )->{template}, '/post/{slug}', "and so is perl's own, which every document above uses" );
+
+    my $document = document( '/n/{x}' => { get => operation( parameters => [ path_parameter('x') ] ) } );
+    TPSGI::Router->new( 'Native.pm' => $document );
+    ok( !ref $document->{paths}{'/n/{x}'}{get}{parameters}[0]{required}, 'and the router leaves the document it was given as it was' );
 };
 
 subtest 'documents that are refused' => sub {

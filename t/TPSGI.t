@@ -144,7 +144,7 @@ subtest 'serve_ranges' => sub {
 # Writes a router module into $dir, and returns its name relative to $dir.
 sub write_router {
     my ( $package, $body ) = @_;
-    Mojo::File->new("$dir/$package.pm")->spew("package $package;\nuse 5.040;\nuse Mojo::JSON ();\n$body\n1;\n");
+    Mojo::File->new("$dir/$package.pm")->spew("package $package;\nuse 5.040;\n$body\n1;\n");
     return "$package.pm";
 }
 
@@ -173,7 +173,7 @@ subtest 'new' => sub {
                         'x-tpsgi-callback' => sub { },
                         'x-tpsgi-data'     => { from => 'data' },
                         parameters         => [
-                            { name => 'slug',  in => 'path',  required => Mojo::JSON::true, schema => { type => 'string' } },
+                            { name => 'slug',  in => 'path',  required => true, schema => { type => 'string' } },
                             { name => 'limit', in => 'query', schema   => { type => 'integer' } },
                         ],
                         responses => { 200 => { description => 'ok' } },
