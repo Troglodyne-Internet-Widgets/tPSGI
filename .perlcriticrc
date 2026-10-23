@@ -70,9 +70,9 @@ info_level = 30
 [PreferredModules]
 config = .preferred_modules.ini
 # bin/tpsgi is the PSGI application, and starts the server that runs it when it
-# is run itself, from the top of the installation.
+# is run itself.
 [logicLAB::RequireSheBang]
-formats = #!/usr/bin/env perl || #!bin/tarbaby
+formats = #!/usr/bin/env perl || #!/usr/bin/env tarbaby
 # Performance
 [logicLAB::ProhibitShellDispatch]
 [ProhibitPipeOpen]

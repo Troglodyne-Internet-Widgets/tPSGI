@@ -1,4 +1,4 @@
-#!bin/tarbaby
+#!/usr/bin/env tarbaby
 
 # PODNAME: tpsgi
 # ABSTRACT: PSGI application which simplifies migrating legacy/cgi applications to PSGI, but also has advanced features for normal psgi apps

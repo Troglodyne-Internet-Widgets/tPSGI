@@ -28,11 +28,11 @@ sub hello {
 
 # DESCRIPTION
 
-Start it with the Starman options you want, from the directory it is installed
-in:
+Start it with the Starman options you want, from the directory of the
+application, with tarbaby on the PATH:
 
 ```
-bin/tpsgi ... [starman args]
+tpsgi ... [starman args]
 ```
 
 A PSGI server built to migrate old mod\_perl/apache stacks onto psgi, and that powers tCMS.
