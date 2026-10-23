@@ -1,14 +1,29 @@
 #!/usr/bin/env perl
 
+# PODNAME: tpsgi-config
+# ABSTRACT: Print a value from the tPSGI configuration, for shell scripts
+
 package TPSGI::ConfigTool;
 
-use strict;
-use warnings;
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aasx';
 
 use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
 
 use TPSGI;
+
+=head1 USAGE
+
+    tpsgi-config --KEY
+
+Print the value of KEY in F<~/.tpsgi.ini>, or its default, one line for each
+value when it has several.  The keys are the ones that L<TPSGI> documents, and
+C<log_dir> and C<log_name>, which are made from them.  It dies when no key is
+passed.
+
+=cut
 
 sub main {
     my @args = @_;
@@ -16,15 +31,15 @@ sub main {
     my %config = TPSGI::get_config();
 
     my @params = keys(%config);
-    my (%def, %options);
+    my ( %def, %options );
     @def{@params} = map { \$options{$_} } @params;
 
-    GetOptionsFromArray(\@args, %def);
+    GetOptionsFromArray( \@args, %def );
 
-    foreach my $param (keys(%def)) {
+    foreach my $param ( keys(%def) ) {
         next unless $options{$param};
         my @to_print;
-        @to_print = ref $config{$param} eq 'ARRAY' ? @{$config{$param}}: $config{$param};
+        @to_print = ref $config{$param} eq 'ARRAY' ? @{ $config{$param} } : $config{$param};
         foreach my $line (@to_print) {
             print "$line\n";
         }

@@ -1,15 +1,19 @@
 package TPSGI::Startup;
 
+# ABSTRACT: What bin/tarbaby needs before TPSGI is loaded: the configuration, and the inotify watches
+
 # Lightweight startup helpers used by bin/tarbaby before the full TPSGI.pm
 # is loaded into workers.  Keeping these separate means updating TPSGI.pm
 # doesn't require restarting tarbaby to pick up get_config / inotify changes.
 
-use strict;
-use warnings;
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aasx';
 
 use Cwd;
 use File::Basename qw{dirname};
 use File::Find;
+use List::Util   qw{first};
 use Scalar::Util qw{refaddr};
 use Linux::Perl::inotify;
 use Config::Simple;
@@ -29,7 +33,7 @@ our $watching = 0;
 our @DEFAULT_EVENTS = qw{CREATE MODIFY DELETE MOVE};
 
 # Bit => name for every event we can actually be handed back by read().
-my %EVENT_NAMES = map { Linux::Perl::inotify->EVENT_NUMBER()->{$_} => $_ } qw{
+my %EVENT_NAMES = map { Linux::Perl::inotify::->EVENT_NUMBER()->{$_} => $_ } qw{
   ACCESS MODIFY ATTRIB CLOSE_WRITE CLOSE_NOWRITE OPEN
   MOVED_FROM MOVED_TO CREATE DELETE DELETE_SELF MOVE_SELF
   UNMOUNT Q_OVERFLOW IGNORED ISDIR
@@ -58,7 +62,7 @@ sub get_config {
         autoreload => 0,
     );
     my $config_file = "$ENV{HOME}/.tpsgi.ini";
-    if ( -f $config_file ) {
+    if ( -e $config_file ) {
         my $conf = Config::Simple->new($config_file);
         my %config;
         %config = %{ $conf->param( -block => 'default' ) } if $conf;
@@ -100,7 +104,18 @@ sub watch_for_changes {
     return if $watching;
     $watching = 1;
 
-    my @to_watch = _readdir(@dirs);
+    my @to_watch = @dirs;
+    File::Find::find(
+        {
+            wanted => sub {
+                my $object = $_;
+                push( @to_watch, $object ) if ( !-d $object && $object =~ m/[.]pm$/ );
+            },
+            no_chdir => 1,
+            bydepth  => 1,
+        },
+        @dirs
+    );
 
     foreach my $f2watch (@to_watch) {
         print "Watching $f2watch for changes\n";
@@ -148,11 +163,11 @@ sub add_watch {
     my (%args) = @_;
 
     my $path = $args{path};
-    die "add_watch: path is required" unless defined $path && length $path;
+    die "add_watch: path is required"                  if ( $path // '' ) eq '';
     die "add_watch: callback must be a CODE reference" if defined $args{callback} && ref $args{callback} ne 'CODE';
     die "add_watch: events must be an ARRAY reference" if defined $args{events}   && ref $args{events} ne 'ARRAY';
 
-    $inotify //= Linux::Perl::inotify->new( flags => [qw{NONBLOCK}] );
+    $inotify //= Linux::Perl::inotify::->new( flags => [qw{NONBLOCK}] );
 
     my $events = $args{events} || [@DEFAULT_EVENTS];
     my $wd     = $watched{$path};
@@ -181,8 +196,10 @@ sub add_watch {
     $watch->{restart} ||= $args{restart} ? 1 : 0;
 
     if ( $args{callback} ) {
-        my $key      = defined $args{key} ? $args{key} : refaddr( $args{callback} );
-        my $existing = _find_callback( $watch, $key );
+        my $key = defined $args{key} ? $args{key} : refaddr( $args{callback} );
+
+        # Callbacks are kept in an array so that they fire in registration order.
+        my $existing = first { $_->{key} eq $key } @{ $watch->{callbacks} };
         if ($existing) {
             $existing->{code} = $args{callback};
         }
@@ -192,15 +209,6 @@ sub add_watch {
     }
 
     return $wd;
-}
-
-# Callbacks are kept in an array so that they fire in registration order.
-sub _find_callback {
-    my ( $watch, $key ) = @_;
-    foreach my $cb ( @{ $watch->{callbacks} } ) {
-        return $cb if $cb->{key} eq $key;
-    }
-    return undef;
 }
 
 =head2 is_watched($path)
@@ -230,7 +238,7 @@ sub remove_watch {
     @wds = grep { $_ != $wd } @wds;
 
     # The watch may already be gone (deleted file), so don't blow up over it.
-    eval { $inotify->remove($wd) };
+    eval { $inotify->remove($wd) };    ## no critic (RequireCheckingReturnValueOfEval)
 
     return 1;
 }
@@ -315,11 +323,11 @@ sub pending_changes {
     foreach my $event ( $inotify->read() ) {
         my $watch   = $watches{ $event->{wd} };
         my $watched = $watch ? $watch->{path} : '';
-        $watched =~ s|/+$||;
+        $watched =~ s{/+$}{};
 
         # Directory watches tell us the entry which changed, file watches don't.
         my $path = $watched;
-        $path = length($watched) ? "$watched/$event->{name}" : $event->{name} if $event->{name};
+        $path = $watched ne '' ? "$watched/$event->{name}" : $event->{name} if $event->{name};
 
         push(
             @changes,
@@ -334,22 +342,6 @@ sub pending_changes {
     }
 
     return @changes;
-}
-
-sub _readdir {
-    my @dirs = @_;
-    File::Find::find(
-        {
-            wanted => sub {
-                my $object = $_;
-                push( @dirs, $object ) if ( -f $object && $object =~ m/\.pm$/ );
-            },
-            no_chdir => 1,
-            bydepth  => 1,
-        },
-        @dirs
-    );
-    return @dirs;
 }
 
 1;

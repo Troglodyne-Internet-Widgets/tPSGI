@@ -1,7 +1,10 @@
 package TPSGI::Server;
 
-use strict;
-use warnings;
+# ABSTRACT: Starman::Server, with workers that answer the connection they took before a HUP retires them
+
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aasx';
 
 use parent qw{Starman::Server};
 
@@ -41,7 +44,9 @@ sub child_init_hook {
     $self->SUPER::child_init_hook(@_);
 
     my $prop = $self->{server};
-    $SIG{HUP} = sub {
+
+    # For the life of the worker, so not localized.
+    $SIG{HUP} = sub {    ## no critic (RequireLocalizedPunctuationVars)
         $prop->{SigHUPed} = 1;
 
         # Makes Net::Server's accept() return rather than retry, so a worker

@@ -1,8 +1,9 @@
 #!/usr/bin/env perl
 # Use to call specific routes with the same configuration your website has
 
-use strict;
-use warnings;
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aasx';
 
 use Data::Dumper;
 use FindBin::libs;
@@ -25,7 +26,7 @@ my %env = (
     REQUEST_METHOD => $ARGV[0],
     PATH_INFO      => $ARGV[1],
     QUERY_STRING   => $ARGV[2],
-    REQUEST_URI    => "http://$host/".$ARGV[1],
+    REQUEST_URI    => "http://$host/" . $ARGV[1],
     HTTP_HOST      => $host,
     HTTP_COOKIE    => $ARGV[3],
     'psgi.errors'  => *STDERR,
@@ -33,16 +34,18 @@ my %env = (
 );
 
 sub emit_error {
-    my $env = shift;
-    return $env->{'psgi.errors'}->print(shift) if $env->{'psgi.errors'};
-    print $@;
+    my ( $env, $err ) = @_;
+    return $env->{'psgi.errors'}->print($err) if $env->{'psgi.errors'};
+    print $err;
+    return;
 }
 
 my %cfg;
 our $app = sub {
+
     # Allow re-run
     if (%cfg) {
-        chdir($cfg{tpsgi_dir}) || warn "Can't chdir to $cfg{tpsgi_dir}: $_";
+        chdir( $cfg{tpsgi_dir} ) || warn "Can't chdir to $cfg{tpsgi_dir}: $!";
     }
 
     %cfg = TPSGI::get_config();
@@ -51,7 +54,7 @@ our $app = sub {
     $cfg{verbose} = 1;
 
     # Change your dir into whatever basedir you need to be in
-    chdir($cfg{'basedir'}) || warn "Can't chdir to $cfg{'basedir'}: $_";
+    chdir( $cfg{'basedir'} ) || warn "Can't chdir to $cfg{'basedir'}: $!";
 
     # If we have manually set the NYTPROF var, use it and don't try to control
     # When to stop or start it.
@@ -64,51 +67,49 @@ our $app = sub {
 
     return eval { $self->app(@_) } || do {
         my $env = shift;
-        emit_error($env, $@);
+        emit_error( $env, $@ );
 
         # Redact the stack trace past line 1, it usually has things which should not be shown
         $self->{cur_query}->{message} = $@;
         $self->{cur_query}->{message} =~ s/\n.*//g if $self->{cur_query}->{message};
-        return $self->error($self->{cur_query});
+        return $self->error( $self->{cur_query} );
     };
 };
 
 sub stream_to_stdout {
     my ($input) = @_;
     my ( $code, $headers ) = @$input;
-    print "RC: $code\n";
-    print "Headers:\n";
-    print Dumper($headers);
+    print "RC: $code\n", "Headers:\n", Dumper($headers);
     return \*STDOUT;
 }
 
-my $limit = $ARGV[4] || 1;
+my $limit         = $ARGV[4] || 1;
 my $max_redirects = $ARGV[5] || 6;
-my $redirects=0;
+my $redirects     = 0;
 
 for ( 1 .. $limit ) {
-    LOOP:
+  LOOP:
     my $out = $app->( \%env );
 
-    if (ref $out eq 'CODE') {
-        $out->(\&stream_to_stdout);
+    if ( ref $out eq 'CODE' ) {
+        $out->( \&stream_to_stdout );
         next;
     }
-    if (ref $out eq 'ARRAY') {
+    if ( ref $out eq 'ARRAY' ) {
+
         # Might be a redirect, so check
-        my $rc = $out->[0];
-        my %hdr = @{$out->[1]};
-        my $to = $hdr{Location};
+        my %hdr = @{ $out->[1] };
+        my $to  = $hdr{Location};
         if ($to) {
             $env{REQUEST_URI} = "http://$host/$to";
             $env{PATH_INFO}   = $to;
             $redirects++;
-            die "Max redirects reached!" unless $redirects < $max_redirects;
+            die "Max redirects reached!" if $redirects >= $max_redirects;
             goto LOOP;
         }
 
         print $out->[2][0];
         next;
     }
-    die "Weird return:\n".Dumper($out);
+    die "Weird return:\n" . Dumper($out);
 }

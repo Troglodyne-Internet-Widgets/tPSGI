@@ -1,18 +1,22 @@
-use strict;
-use warnings;
+#!/usr/bin/env perl
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aasx';
 
 use Test2::V0;
 use Test2::Plugin::NoWarnings;
 
-use Cwd            qw{abs_path};
-use File::Basename qw{dirname};
 use Test::MockModule;
+use Time::HiRes ();
 
-use lib dirname( abs_path(__FILE__) ) . '/../lib';
+use FindBin::libs;
 
 ok( require TPSGI::Server, 'TPSGI::Server loads' ) or bail_out("Can't find SUT");
 
-sub server { return bless( { server => {@_} }, 'TPSGI::Server' ) }
+sub server {
+    my (%server) = @_;
+    return bless( { server => \%server }, 'TPSGI::Server' );
+}
 
 subtest 'child_init_hook' => sub {
     my $starman = Test::MockModule->new('Starman::Server');
@@ -49,6 +53,7 @@ subtest 'every connection is answered while the parent is HUPed' => sub {
     skip_all('RELEASE_TESTING not set') unless $ENV{RELEASE_TESTING};
 
     require File::Temp;
+    require Mojo::File;
     require IO::Socket::UNIX;
     require Plack::Handler::TPSGI;
 
@@ -57,14 +62,13 @@ subtest 'every connection is answered while the parent is HUPed' => sub {
 
     my $server = fork() // die "fork: $!";
     if ( !$server ) {
-        close(STDERR);
-        Plack::Handler::TPSGI->new( listen => [$sock], workers => 5, pid => "$dir/pid", keepalive => 0 )
-          ->run( sub { [ 200, [ 'Content-Type' => 'text/plain' ], ['ok'] ] } );
+        close(STDERR) or die "Cannot close STDERR: $!";
+        Plack::Handler::TPSGI->new( listen => [$sock], workers => 5, pid => "$dir/pid", keepalive => 0 )->run( sub { [ 200, [ 'Content-Type' => 'text/plain' ], ['ok'] ] } );
         exit 0;
     }
-    for ( 1 .. 100 ) { last if -S $sock && -s "$dir/pid"; select( undef, undef, undef, 0.1 ) }
+    for ( 1 .. 100 ) { last if -S $sock && -s "$dir/pid"; Time::HiRes::sleep(0.1) }
     ok( -S $sock, 'the server is listening' ) or return;
-    my $parent = do { open( my $fh, '<', "$dir/pid" ) or die $!; local $/; <$fh> };
+    my $parent = Mojo::File->new("$dir/pid")->slurp;
     chomp $parent;
 
     # Four clients, each counting the requests that got no answer.
@@ -74,16 +78,17 @@ subtest 'every connection is answered while the parent is HUPed' => sub {
             my $bad = 0;
             for ( 1 .. 1500 ) {
                 my $c = IO::Socket::UNIX->new( Peer => $sock ) or do { $bad++; next };
-                print $c "GET / HTTP/1.0\r\n\r\n";
-                my $got = do { local $/; <$c> } // '';
-                $bad++ unless $got =~ m{^HTTP/1\.\d 200}a;
+                print {$c} "GET / HTTP/1.0\r\n\r\n";
+                my $got = do { local $/; <$c> }
+                  // '';
+                $bad++ unless $got =~ m{^HTTP/1[.]\d[ ]200};
             }
             exit( $bad > 255 ? 255 : $bad );
         }
         $pid
     } 1 .. 4;
 
-    for ( 1 .. 60 ) { kill( 'HUP', $parent ); select( undef, undef, undef, 0.05 ) }
+    for ( 1 .. 60 ) { kill( 'HUP', $parent ); Time::HiRes::sleep(0.05) }
 
     my $unanswered = 0;
     foreach my $pid (@clients) { waitpid( $pid, 0 ); $unanswered += $? >> 8 }

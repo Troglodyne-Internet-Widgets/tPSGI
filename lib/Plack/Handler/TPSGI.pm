@@ -1,7 +1,10 @@
 package Plack::Handler::TPSGI;
 
-use strict;
-use warnings;
+# ABSTRACT: Plack::Handler::Starman, running TPSGI::Server
+
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aasx';
 
 use parent qw{Plack::Handler::Starman};
 

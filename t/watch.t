@@ -1,14 +1,15 @@
-use strict;
-use warnings;
+#!/usr/bin/env perl
+use 5.040;
+use warnings FATAL => 'all';
+use re '/aasx';
 
 use Test2::V0;
 
-use Cwd            qw{abs_path};
-use File::Path     qw{make_path remove_tree};
-use File::Temp     qw{tempdir};
-use File::Basename qw{dirname};
+use File::Path qw{make_path remove_tree};
+use File::Temp qw{tempdir};
+use Test::MockModule;
 
-use lib dirname( abs_path(__FILE__) ) . '/../lib';
+use FindBin::libs;
 
 use TPSGI::Startup;
 use TPSGI;
@@ -31,17 +32,11 @@ my $tpsgi = bless(
     'TPSGI'
 );
 
-# Give the kernel a moment to queue events, then drain.
-sub changes {
-    select( undef, undef, undef, 0.1 );
-    return TPSGI::Startup::pending_changes();
-}
-
 subtest 'watching a file with a callback' => sub {
     my $file = "$tmp/subject.txt";
     open( my $fh, '>', $file ) or die $!;
-    print $fh "initial\n";
-    close $fh;
+    print {$fh} "initial\n";
+    close($fh) or die "Cannot close: $!";
 
     my @fired;
     my $wd = $tpsgi->add_watch( $file, sub { my ( $t, $change ) = @_; push( @fired, $change ) } );
@@ -49,8 +44,8 @@ subtest 'watching a file with a callback' => sub {
     ok( TPSGI::Startup::is_watched($file), "path is now watched" );
 
     open( $fh, '>>', $file ) or die $!;
-    print $fh "more\n";
-    close $fh;
+    print {$fh} "more\n";
+    close($fh) or die "Cannot close: $!";
 
     $tpsgi->handle_changes();
 
@@ -63,8 +58,8 @@ subtest 'watching a file with a callback' => sub {
 
     @fired = ();
     open( $fh, '>>', $file ) or die $!;
-    print $fh "even more\n";
-    close $fh;
+    print {$fh} "even more\n";
+    close($fh) or die "Cannot close: $!";
     $tpsgi->handle_changes();
     is( scalar(@fired), 0, "removed watches no longer fire" );
 };
@@ -72,10 +67,12 @@ subtest 'watching a file with a callback' => sub {
 subtest 'registering the same callback repeatedly is idempotent' => sub {
     my $file = "$tmp/idempotent.txt";
     open( my $fh, '>', $file ) or die $!;
-    close $fh;
+    close($fh)                 or die "Cannot close: $!";
 
     my @fired;
-    my $cb = sub { push( @fired, $_[1] ) };
+
+    # One reference, registered five times: that is the case being tested.
+    my $cb = sub { push( @fired, $_[1] ) };    ## no critic (ProhibitSingleUseLexicalSubs)
 
     # new() runs per request, so routers re-register their watches constantly.
     $tpsgi->add_watch( $file, $cb ) for 1 .. 5;
@@ -84,8 +81,8 @@ subtest 'registering the same callback repeatedly is idempotent' => sub {
     is( scalar( @{ $TPSGI::Startup::watches{$wd}{callbacks} } ), 1, "callback registered exactly once" );
 
     open( $fh, '>>', $file ) or die $!;
-    print $fh "poke\n";
-    close $fh;
+    print {$fh} "poke\n";
+    close($fh) or die "Cannot close: $!";
     $tpsgi->handle_changes();
 
     is( scalar(@fired), 1, "and it only fires once" );
@@ -96,15 +93,15 @@ subtest 'registering the same callback repeatedly is idempotent' => sub {
 subtest 'distinct callbacks on one path both fire, in order' => sub {
     my $file = "$tmp/multi.txt";
     open( my $fh, '>', $file ) or die $!;
-    close $fh;
+    close($fh)                 or die "Cannot close: $!";
 
     my @fired;
     $tpsgi->add_watch( $file, sub { push( @fired, 'first' ) } );
     $tpsgi->add_watch( $file, sub { push( @fired, 'second' ) } );
 
     open( $fh, '>>', $file ) or die $!;
-    print $fh "poke\n";
-    close $fh;
+    print {$fh} "poke\n";
+    close($fh) or die "Cannot close: $!";
     $tpsgi->handle_changes();
 
     is( \@fired, [qw{first second}], "both callbacks fired in registration order" );
@@ -120,7 +117,7 @@ subtest 'watching a directory reports the entries which changed' => sub {
     $tpsgi->add_watch( $dir, sub { push( @fired, $_[1] ) } );
 
     open( my $fh, '>', "$dir/created.txt" ) or die $!;
-    close $fh;
+    close($fh)                              or die "Cannot close: $!";
     $tpsgi->handle_changes();
 
     ok( scalar(@fired), "got at least one change for the directory" );
@@ -134,16 +131,16 @@ subtest 'watching a directory reports the entries which changed' => sub {
 subtest 'watches survive a file being replaced wholesale' => sub {
     my $file = "$tmp/renamed.txt";
     open( my $fh, '>', $file ) or die $!;
-    print $fh "one\n";
-    close $fh;
+    print {$fh} "one\n";
+    close($fh) or die "Cannot close: $!";
 
     my @fired;
-    my $original_wd = $tpsgi->add_watch( $file, sub { push( @fired, $_[1] ) } );
+    $tpsgi->add_watch( $file, sub { push( @fired, $_[1] ) } );
 
     # The write-a-tempfile-then-rename-over-it dance, which kills the old watch.
     open( $fh, '>', "$tmp/renamed.tmp" ) or die $!;
-    print $fh "two\n";
-    close $fh;
+    print {$fh} "two\n";
+    close($fh)                          or die "Cannot close: $!";
     rename( "$tmp/renamed.tmp", $file ) or die $!;
 
     $tpsgi->handle_changes();
@@ -155,8 +152,8 @@ subtest 'watches survive a file being replaced wholesale' => sub {
 
     @fired = ();
     open( $fh, '>>', $file ) or die $!;
-    print $fh "three\n";
-    close $fh;
+    print {$fh} "three\n";
+    close($fh) or die "Cannot close: $!";
     $tpsgi->handle_changes();
     is( scalar(@fired), 1, "and still fires for changes to the new inode" );
 
@@ -166,15 +163,15 @@ subtest 'watches survive a file being replaced wholesale' => sub {
 subtest 'a dying callback does not take out the request' => sub {
     my $file = "$tmp/exploding.txt";
     open( my $fh, '>', $file ) or die $!;
-    close $fh;
+    close($fh)                 or die "Cannot close: $!";
 
     my @fired;
     $tpsgi->add_watch( $file, sub { die "nope\n" },          key => 'boom' );
     $tpsgi->add_watch( $file, sub { push( @fired, 'ran' ) }, key => 'fine' );
 
     open( $fh, '>>', $file ) or die $!;
-    print $fh "poke\n";
-    close $fh;
+    print {$fh} "poke\n";
+    close($fh) or die "Cannot close: $!";
 
     ok( lives { $tpsgi->handle_changes() }, "handle_changes survives a dying callback" );
     is( \@fired, ['ran'], "and still runs the other callbacks" );
@@ -198,21 +195,20 @@ subtest 'libdir watches still drive autoreload' => sub {
     my $libdir = "$tmp/lib";
     make_path($libdir);
     open( my $fh, '>', "$libdir/Fake.pm" ) or die $!;
-    print $fh "1;\n";
-    close $fh;
+    print {$fh} "1;\n";
+    close($fh) or die "Cannot close: $!";
 
     TPSGI::Startup::watch_for_changes($libdir);
 
     my $restarted = 0;
-    no warnings qw{redefine once};
-    local *TPSGI::signal_restart_parent = sub { $restarted++ };
-    use warnings;
+    my $mock      = Test::MockModule->new('TPSGI');
+    $mock->redefine( signal_restart_parent => sub { $restarted++ } );
 
     open( $fh, '>>', "$libdir/Fake.pm" ) or die $!;
-    print $fh "# poke\n";
-    close $fh;
+    print {$fh} "# poke\n";
+    close($fh) or die "Cannot close: $!";
 
-    local $tpsgi->{autoreload} = 1;
+    $tpsgi->{autoreload} = 1;
     $tpsgi->handle_changes();
     ok( $restarted, "a changed .pm in a libdir signals a restart" );
 
@@ -220,16 +216,17 @@ subtest 'libdir watches still drive autoreload' => sub {
     $restarted = 0;
     my $data = "$tmp/data.pm";
     open( $fh, '>', $data ) or die $!;
-    close $fh;
+    close($fh)              or die "Cannot close: $!";
     $tpsgi->add_watch( $data, sub { } );
     open( $fh, '>>', $data ) or die $!;
-    print $fh "poke\n";
-    close $fh;
+    print {$fh} "poke\n";
+    close($fh) or die "Cannot close: $!";
 
     $tpsgi->handle_changes();
     ok( !$restarted, "but a .pm watched by an app does not" );
 
     TPSGI::Startup::remove_watch($data);
+    $tpsgi->{autoreload} = 0;
 };
 
 done_testing();
