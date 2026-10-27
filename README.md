@@ -461,11 +461,20 @@ operation in `$query->{dispatcher}`, and the template that matched in
 Before the callback runs, tPSGI checks the request against the operation's
 `parameters` and `requestBody`.  Values are coerced to their schema, so an
 integer arrives as a number.  A request that fails gets a 400, and the reasons
-go to the log at the debug level, not into the page.  The 400 is also the
-answer to a query key that the operation does not declare, when the operation
-declares a query parameter or a request body.  A form body is as strict as the
-`additionalProperties` of its schema.  A body whose media type is not among
-the `content` of the `requestBody` gets a 415.
+go to the log at the debug level, not into the page.  A body whose media type
+is not among the `content` of the `requestBody` gets a 415.
+
+Every name in the request must be declared, because each one reaches the
+callback as a key of its query, where it can stand in for a key that the
+callback meant to set itself.  So the 400 is also the answer to a query key
+that is not a query parameter, to a body sent to an operation that has no
+`requestBody`, and to a field or a file that is not a property of the body's
+schema.  A schema that says `additionalProperties`
+decides for itself which other properties it takes.
+
+CGI mode is the exception, for a CGI that reads whatever it is sent.  An
+operation with `x-tpsgi-env` is not validated, and its callback finds the
+request in %ENV.
 
 ## Callbacks
 

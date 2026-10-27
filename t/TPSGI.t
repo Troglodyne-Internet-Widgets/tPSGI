@@ -242,6 +242,19 @@ subtest 'new' => sub {
                         responses => { 200 => { description => 'ok' } },
                     },
                 },
+                '/cgi' => {
+                    get => {
+                        'x-tpsgi-callback' => sub { return [ 200, [], [ $ENV{QUERY_STRING} ] ] },
+                        'x-tpsgi-env'      => true,
+                        responses          => { 200 => { description => 'ok' } },
+                    },
+                },
+                '/plain' => {
+                    post => {
+                        'x-tpsgi-callback' => sub { return [ 200, [], ['ok'] ] },
+                        responses          => { 200 => { description => 'ok' } },
+                    },
+                },
             },
         );
         ROUTER
@@ -302,6 +315,29 @@ subtest 'route' => sub {
     ok( $query->{has_query}, 'beside has_query' );
 
     is( $query_of->(undef)->{query_string}, q{}, 'a request without one gets an empty string, not undef' );
+};
+
+subtest 'extract_query, with a body' => sub {
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
+    my $part  = qq{--x\r\nContent-Disposition: form-data; name="file"; filename="f.txt"\r\nContent-Type: text/plain\r\n\r\nhi\r\n--x--\r\n};
+    my %env   = (
+        REQUEST_METHOD => 'POST',
+        CONTENT_TYPE   => 'multipart/form-data; boundary=x',
+        CONTENT_LENGTH => length($part),
+    );
+
+    local @Test::Logger::Capture::lines;
+    open( my $input, '<', \$part ) or die "Cannot open a scalar: $!";
+    my $res = $tpsgi->extract_query( '/plain', $tpsgi->routes->match( 'POST', '/plain' ), { %env, 'psgi.input' => $input } );
+    close($input) or die "Cannot close: $!";
+    is( ref $res eq 'ARRAY' && $res->[0], 400, 'a file, to an operation with no requestBody, is a 400' );
+};
+
+subtest 'route, in CGI mode' => sub {
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
+    my $res   = $tpsgi->respond( { REQUEST_METHOD => 'GET', PATH_INFO => '/cgi', REQUEST_URI => '/cgi?anything=1', QUERY_STRING => 'anything=1', HTTP_HOST => 'test.test' } );
+    is( $res->[0],    200,          'is not validated, so a key that nothing declares is no 400' );
+    is( $res->[2][0], 'anything=1', 'and the CGI finds it in %ENV' );
 };
 
 subtest 'respond, with a method that the path does not have' => sub {

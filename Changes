@@ -14,3 +14,7 @@ Revision history for TPSGI
       is answered by its index.html, index.htm or index.cgi, as before.
     - Run a CGI only from a directory that cgi_dirs names, and none by
       default.  An executable file anywhere else in www/ is served as it is.
+    - Every name in a request must be declared, or the request is a 400:
+      each key of the query, and each field and file of the body, unless a
+      body schema says additionalProperties.  An operation in CGI mode is
+      not validated.

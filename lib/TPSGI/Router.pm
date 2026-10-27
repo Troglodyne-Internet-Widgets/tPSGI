@@ -391,8 +391,9 @@ sub resolve_callback {
 =head2 rules_for($schema, $method, $template) = HASHREF
 
 What validate() checks of one operation beyond its schema: the names of its
-query parameters, whether an undeclared key in the query is a 400, and the
-media types of its request body.
+query parameters, the media types of its request body, and for each media type
+the names of the properties that its schema takes.  A schema that says
+C<additionalProperties> decides for itself, so it has no names here.
 
 =over 4
 
@@ -416,11 +417,18 @@ sub rules_for {
     my @parameters = @{ $schema->parameters_for_request( [ $method, $template ] ) };
     my %declared   = map  { $_->{name} => 1 } grep { $_->{in} eq 'query' } @parameters;
     my ($body)     = grep { $_->{in} eq 'body' } @parameters;
+    my @types      = $body ? sort keys( %{ $body->{content} // {} } ) : ();
+
+    # get() rather than the content itself, because get() follows a $ref.
+    my %body_names = map {
+        my $of = $schema->get( [ 'paths', $template, $method, 'requestBody', 'content', $_, 'schema' ] ) // {};
+        exists $of->{additionalProperties} ? () : ( $_ => { map { $_ => 1 } keys( %{ $of->{properties} // {} } ) } );
+    } @types;
 
     return {
         query_names => \%declared,
-        strict      => ( %declared || $body ) ? 1                                            : 0,
-        body_types  => $body                  ? [ sort keys( %{ $body->{content} // {} } ) ] : undef,
+        body_types  => $body ? \@types : undef,
+        body_names  => \%body_names,
     };
 }
 
@@ -481,15 +489,30 @@ sub match {
 =head2 validate($route, %request) = LIST
 
 Check a request against the operation of the $route that match() returned.
-%request holds C<query> and C<body>, each a HASH reference, C<content_type>,
-and C<env>, the PSGI environment, from which the headers and cookies come.
+%request holds C<query> and C<body>, each a HASH reference, C<uploads>, the
+names of the files in the body, C<content_type>, and C<env>, the PSGI
+environment, from which the headers and cookies come.
 
 It returns an empty list when the request is valid.  Otherwise it returns a
 status and the reasons.  The status is 415 when the operation has a request
 body and the media type of the request is not among its C<content>.  It is 400
-when a parameter or the body does not match its schema, and when the query
-holds a key that the operation does not declare.  The last rule holds only for
-an operation that declares a query parameter or a request body.
+when a parameter or the body does not match its schema, and when the request
+holds a name that the operation does not declare:
+
+=over
+
+=item a key of the query that is not a query parameter, unless tPSGI sets
+that key itself;
+
+=item any field or file, when the operation has no C<requestBody>;
+
+=item a field or file that is not a property of the schema for its media type,
+unless that schema says C<additionalProperties>.
+
+=back
+
+An operation in CGI mode is never validated, because route() builds no query
+for it.
 
 The values of C<path>, C<query> and C<body> are coerced in place, so a parameter
 of type integer arrives as a number.
@@ -513,17 +536,22 @@ sub validate {
     my $query = $request{query} // {};
     my $body  = $request{body};
     my $env   = $request{env} // {};
+    my @sent  = sort( keys( %{ $body // {} } ), @{ $request{uploads} // [] } );
 
-    if ( $route->{body_types} && defined $body ) {
-        my $type = $request{content_type} // '';
-        return ( 415, "/body: '$type' is not one of @{ $route->{body_types} }" ) unless JSON::Validator::Util::negotiate_content_type( $route->{body_types}, $type );
-    }
+    if ( $route->{body_types} && ( defined $body || @sent ) ) {
+        my $type   = $request{content_type} // '';
+        my $actual = JSON::Validator::Util::negotiate_content_type( $route->{body_types}, $type );
+        return ( 415, "/body: '$type' is not one of @{ $route->{body_types} }" ) unless $actual;
 
-    if ( $route->{strict} ) {
-        my %known      = ( %{ $route->{query_names} }, map { $_ => 1 } @reserved );
-        my @undeclared = grep { !$known{$_} } sort keys(%$query);
-        return ( 400, map { "/$_: the operation does not declare this parameter" } @undeclared ) if @undeclared;
+        my $names = $route->{body_names}{$actual};
+        my @extra = $names ? grep { !$names->{$_} } @sent : ();
+        return ( 400, map { "/body/$_: the schema of $actual does not declare this property" } @extra ) if @extra;
     }
+    return ( 400, map { "/body/$_: the operation takes no body" } @sent ) if @sent && !$route->{body_types};
+
+    my %known      = ( %{ $route->{query_names} }, map { $_ => 1 } @reserved );
+    my @undeclared = grep { !$known{$_} } sort keys(%$query);
+    return ( 400, map { "/$_: the operation does not declare this parameter" } @undeclared ) if @undeclared;
 
     my %cookies = map { split( m/=/, $_, 2 ) } split( m/ ; [ ]* /, $env->{HTTP_COOKIE} // '' );
     my %headers = map {
