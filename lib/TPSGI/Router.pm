@@ -63,10 +63,6 @@ order of a hash.
 
 my @methods = qw{get put post delete options head patch trace};
 
-# The keys of the query that tPSGI sets itself.  The query string can hold
-# them without a 400, because route() replaces them anyway.
-my @reserved = qw{tpsgi ip ua user referer route dispatcher};
-
 # How concrete a segment is.  A lower rank wins.
 my %rank = (
     literal => 0,
@@ -88,6 +84,10 @@ new() dies with the reason when a document is not valid OpenAPI 3, when an
 operation has no C<x-tpsgi-callback>, or when its callback is a name that is
 not a defined sub.  It also dies on two templates that differ only in the names
 of their variables, and on one template and method in two documents.
+
+The path, the query and the body of a request share one input, so new() also
+dies on an operation that gives one name to two of them, or whose
+C<x-tpsgi-data> sets a name that the request can give.
 
     my $router = TPSGI::Router->new( 'lib/My/Routes.pm' => \%My::Routes::openapi );
 
@@ -195,6 +195,8 @@ sub add_document {
             die "$name: \U$method\E $template is also a route of $matcher->{methods}{$method}{router}\n" if $matcher->{methods}{$method};
 
             my $operation = $paths->{$template}{$method};
+            my $rules     = $self->rules_for( $schema, $method, $template );
+            check_names( "$name: \U$method\E $template", $operation, $rules );
             $matcher->{methods}{$method} = {
                 router    => $name,
                 template  => $template,
@@ -202,7 +204,7 @@ sub add_document {
                 operation => $operation,
                 schema    => $schema,
                 callback  => resolve_callback( "$name: \U$method\E $template", $operation->{'x-tpsgi-callback'} ),
-                %{ $self->rules_for( $schema, $method, $template ) },
+                %$rules,
             };
         }
     }
@@ -391,9 +393,10 @@ sub resolve_callback {
 =head2 rules_for($schema, $method, $template) = HASHREF
 
 What validate() checks of one operation beyond its schema: the names of its
-query parameters, the media types of its request body, and for each media type
-the names of the properties that its schema takes.  A schema that says
-C<additionalProperties> decides for itself, so it has no names here.
+path variables and its query parameters, the media types of its request body,
+and for each media type the names of the properties that its schema names.
+C<closed> holds the media types whose schema does not say
+C<additionalProperties>, which take no other property.
 
 =over 4
 
@@ -405,7 +408,8 @@ C<additionalProperties> decides for itself, so it has no names here.
 
 =back
 
-Returns HashRef, with C<query_names>, C<strict> and C<body_types>.
+Returns HashRef, with C<path_names>, C<query_names>, C<body_types>, C<body_names>
+and C<closed>.
 
     my $rules = $router->rules_for( $schema, 'get', '/hello' );
 
@@ -415,21 +419,53 @@ sub rules_for {
     my ( $self, $schema, $method, $template ) = @_;
 
     my @parameters = @{ $schema->parameters_for_request( [ $method, $template ] ) };
-    my %declared   = map  { $_->{name} => 1 } grep { $_->{in} eq 'query' } @parameters;
-    my ($body)     = grep { $_->{in} eq 'body' } @parameters;
-    my @types      = $body ? sort keys( %{ $body->{content} // {} } ) : ();
+    my %in         = map {
+        my $in = $_;
+        ( $in => { map { ( $_->{name} =~ s/ [+] \z //r ) => 1 } grep { $_->{in} eq $in } @parameters } )
+    } qw{path query};
+    my ($body) = grep { $_->{in} eq 'body' } @parameters;
+    my @types = $body ? sort keys( %{ $body->{content} // {} } ) : ();
 
     # get() rather than the content itself, because get() follows a $ref.
-    my %body_names = map {
-        my $of = $schema->get( [ 'paths', $template, $method, 'requestBody', 'content', $_, 'schema' ] ) // {};
-        exists $of->{additionalProperties} ? () : ( $_ => { map { $_ => 1 } keys( %{ $of->{properties} // {} } ) } );
-    } @types;
+    my ( %body_names, %closed );
+    foreach my $type (@types) {
+        my $of = $schema->get( [ 'paths', $template, $method, 'requestBody', 'content', $type, 'schema' ] ) // {};
+        $body_names{$type} = { map { $_ => 1 } keys( %{ $of->{properties} // {} } ) };
+        $closed{$type}     = 1 unless exists $of->{additionalProperties};
+    }
 
     return {
-        query_names => \%declared,
+        path_names  => $in{path},
+        query_names => $in{query},
         body_types  => $body ? \@types : undef,
         body_names  => \%body_names,
+        closed      => \%closed,
     };
+}
+
+=head2 check_names($what, $operation, $rules)
+
+A function.  Die, and name $what, when the rules_for() of $operation give one
+name to two of the path, the query and the body, or when its C<x-tpsgi-data>
+sets a name that one of them declares.
+
+=cut
+
+sub check_names {
+    my ( $what, $operation, $rules ) = @_;
+
+    my %where;
+    push( @{ $where{$_} }, 'the path' )  for keys( %{ $rules->{path_names} } );
+    push( @{ $where{$_} }, 'the query' ) for keys( %{ $rules->{query_names} } );
+    push( @{ $where{$_} }, 'the body' )  for List::Util::uniq( map { keys(%$_) } values( %{ $rules->{body_names} } ) );
+
+    my @twice = grep { @{ $where{$_} } > 1 } sort keys(%where);
+    die "$what: $_ is a name of " . join( ' and of ', @{ $where{$_} } ) . "\n" for @twice;
+
+    my $data  = $operation->{'x-tpsgi-data'};
+    my @fixed = ref $data eq 'HASH' ? grep { $where{$_} } sort keys(%$data) : ();
+    die "$what: x-tpsgi-data sets $_, which is a name of $where{$_}[0]\n" for @fixed;
+    return;
 }
 
 =head2 match($method, $path) = HASHREF
@@ -501,13 +537,15 @@ holds a name that the operation does not declare:
 
 =over
 
-=item a key of the query that is not a query parameter, unless tPSGI sets
-that key itself;
+=item a key of the query that is not a query parameter;
 
 =item any field or file, when the operation has no C<requestBody>;
 
 =item a field or file that is not a property of the schema for its media type,
-unless that schema says C<additionalProperties>.
+unless that schema says C<additionalProperties>;
+
+=item a field or file that a schema with C<additionalProperties> takes, whose
+name is a path variable or a query parameter.
 
 =back
 
@@ -544,13 +582,15 @@ sub validate {
         return ( 415, "/body: '$type' is not one of @{ $route->{body_types} }" ) unless $actual;
 
         my $names = $route->{body_names}{$actual};
-        my @extra = $names ? grep { !$names->{$_} } @sent : ();
+        my @extra = $route->{closed}{$actual} ? grep { !$names->{$_} } @sent : ();
         return ( 400, map { "/body/$_: the schema of $actual does not declare this property" } @extra ) if @extra;
+
+        my @taken = grep { $route->{path_names}{$_} || $route->{query_names}{$_} } @sent;
+        return ( 400, map { "/body/$_: the path or the query declares this name" } @taken ) if @taken;
     }
     return ( 400, map { "/body/$_: the operation takes no body" } @sent ) if @sent && !$route->{body_types};
 
-    my %known      = ( %{ $route->{query_names} }, map { $_ => 1 } @reserved );
-    my @undeclared = grep { !$known{$_} } sort keys(%$query);
+    my @undeclared = grep { !$route->{query_names}{$_} } sort keys(%$query);
     return ( 400, map { "/$_: the operation does not declare this parameter" } @undeclared ) if @undeclared;
 
     my %cookies = map { split( m/=/, $_, 2 ) } split( m/ ; [ ]* /, $env->{HTTP_COOKIE} // '' );

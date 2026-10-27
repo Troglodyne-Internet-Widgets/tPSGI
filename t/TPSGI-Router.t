@@ -79,6 +79,12 @@ my $router = TPSGI::Router->new(
                 },
             ),
         },
+        '/open/{slug}' => {
+            post => operation(
+                parameters  => [ path_parameter('slug') ],
+                requestBody => { content => { 'application/x-www-form-urlencoded' => { schema => { type => 'object', additionalProperties => true } } } },
+            ),
+        },
         '/open' => {
             post => operation(
                 requestBody => {
@@ -212,7 +218,8 @@ subtest 'validation' => sub {
     ( $status, @errors ) = $router->validate( $route, query => { limit => 1, junk => 1 } );
     is( $status, 400, 'an undeclared query key is a 400' );
     like( \@errors, [qr/\/junk:/], 'and named' );
-    is( [ $router->validate( $route, query => { limit => 1, route => '/x' } ) ], [], 'except a key that tPSGI sets itself' );
+    ( $status, @errors ) = $router->validate( $route, query => { limit => 1, route => '/x' } );
+    is( $status, 400, 'even one that tPSGI sets in the query itself, since the input is apart from it' );
     ( $status, @errors ) = $router->validate( $router->match( 'GET', '/loose' ), query => { anything => 1 } );
     is( $status, 400, 'and so is any key of the query, for an operation that declares nothing' );
     like( \@errors, [qr/\/anything:/], 'named too' );
@@ -257,6 +264,32 @@ subtest 'the names of a body' => sub {
     is( [ $router->validate( $route, body => { count => 3 }, content_type => $form_type ) ], [], 'and does name the count' );
 
     is( [ $router->validate( $router->match( 'POST', '/open' ), body => { count => 3, junk => 1 }, content_type => $form_type ) ], [], 'a schema with additionalProperties takes what it says it takes' );
+    ( $status, @errors ) = $router->validate( $router->match( 'POST', '/open/x' ), body => { slug => 'y' }, content_type => $form_type );
+    is( $status, 400, 'but not a name that the path or the query declares' );
+    like( \@errors, [qr/\/body\/slug:[ ]the[ ]path[ ]or[ ]the[ ]query/], 'for that reason' );
+};
+
+subtest 'one name in two places' => sub {
+    my $form  = { content => { 'application/x-www-form-urlencoded' => { schema => { type => 'object', properties => { limit => { type => 'integer' } } } } } };
+    my $query = { name    => 'limit', in => 'query', schema => { type => 'integer' } };
+    my $limit = qr/limit[ ]is[ ]a[ ]name[ ]of/;
+
+    like(
+        dies { TPSGI::Router->new( 'Test.pm' => document( '/a' => { post => operation( parameters => [$query], requestBody => $form ) } ) ) },
+        qr/POST[ ]\/a:[ ]$limit[ ]the[ ]query[ ]and[ ]of[ ]the[ ]body/,
+        'the query and the body die'
+    );
+    like(
+        dies { TPSGI::Router->new( 'Test.pm' => document( '/a/{limit}' => { get => operation( parameters => [ $query, path_parameter('limit') ] ) } ) ) },
+        qr/$limit[ ]the[ ]path[ ]and[ ]of[ ]the[ ]query/,
+        'and so do the path and the query'
+    );
+    like(
+        dies { TPSGI::Router->new( 'Test.pm' => document( '/a' => { get => operation( parameters => [$query], 'x-tpsgi-data' => { limit => 1 } ) } ) ) },
+        qr/x-tpsgi-data[ ]sets[ ]limit,[ ]which[ ]is[ ]a[ ]name/,
+        'and x-tpsgi-data that sets a name the request can give'
+    );
+    ok( lives { TPSGI::Router->new( 'Test.pm' => document( '/a' => { get => operation( parameters => [$query], 'x-tpsgi-data' => { other => 1 } ) } ) ) }, 'but not x-tpsgi-data of another name' ) or note $@;
 };
 
 subtest 'precedence' => sub {
