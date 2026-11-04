@@ -236,11 +236,6 @@ Extract the headers from a filehandle.  Set the 'Last Modified' header appropria
 
 Returns a code and parsed headers hash.  Code will be 304 if the file hasn't changed since $last\_fetch, otherwise will be the code in the parsed headers.
 
-## static($fullpath, $path, $start, $streaming, $last\_fetch) = PSGI response
-
-Answer with the static render of $path that save\_render() made, headers and
-all, or forbidden() when there is none.
-
 ## get\_config() = HASH
 
 TPSGI::Startup::get\_config(): `~/.tpsgi.ini`, over the defaults.
