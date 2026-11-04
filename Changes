@@ -7,3 +7,4 @@ Revision history for TPSGI
       Templates take {name} and a final {name+}, the most concrete template
       wins, and parameters are validated and coerced by JSON::Validator.
       A path with a method that it has no route for is a 405, not a 400.
+    - static() answers 403 for a file that it cannot open, not a 500.

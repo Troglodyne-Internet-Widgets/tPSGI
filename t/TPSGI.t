@@ -220,4 +220,24 @@ subtest 'respond, with a method that the path does not have' => sub {
     is( { @{ $res->[1] } }->{Allow}, 'GET, HEAD', 'which names the methods it has' );
 };
 
+subtest 'static, with a file that it cannot open' => sub {
+    my $router = write_router( 'StaticRouter', <<~'ROUTER' );
+        our %openapi = (
+            openapi => '3.0.3',
+            info    => { title => 'static', version => '1' },
+            paths   => {
+                '/cached' => {
+                    get => {
+                        'x-tpsgi-callback' => sub ( $tpsgi, $query ) { $tpsgi->static( $query->{fullpath}, 'bogus/never-there', [ Time::HiRes::gettimeofday() ], 0, 0 ) },
+                        responses          => { 200 => { description => 'ok' } },
+                    },
+                },
+            },
+        );
+        ROUTER
+    my $tpsgi = TPSGI->new( %new_options, routers => [$router] );
+    my $res   = $tpsgi->respond( { REQUEST_METHOD => 'GET', PATH_INFO => '/cached', REQUEST_URI => '/cached', HTTP_HOST => 'test.test' } );
+    is( $res->[0], 403, 'is a 403, not a 500 from the log line of forbidden()' );
+};
+
 done_testing();

@@ -1309,7 +1309,7 @@ sub static {    ## no critic (ProhibitManyArgs) -- routers call it with these, i
 
         return [ $code, [%$headers_parsed], $fh ];
     }
-    return $self->forbidden( $self->{current_query} );
+    return $self->forbidden($cur_query);
 }
 
 =head2 get_config() = HASH
