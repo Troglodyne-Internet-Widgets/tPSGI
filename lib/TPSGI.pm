@@ -1266,52 +1266,6 @@ sub extract_headers {
     return ( $code, $offset, %$headers_parsed );
 }
 
-=head2 static($fullpath, $path, $start, $streaming, $last_fetch) = PSGI response
-
-Answer with the static render of $path that save_render() made, headers and
-all, or forbidden() when there is none.
-
-=cut
-
-sub static {    ## no critic (ProhibitManyArgs) -- routers call it with these, in this order
-    my ( $self, $fullpath, $path, $start, $streaming, $last_fetch ) = @_;
-
-    $self->DEBUG("Rendering static for $path");
-
-    # XXX because of psgi I can't just vomit the file directly
-    # The handle is the body of the response, so the server closes it.
-    if ( open( my $fh, '<', "statics/$path" ) ) {    ## no critic (RequireBriefOpen)
-        my ( $code, $offset, $headers_parsed ) = ( 200, undef, {} );
-        ( $code, $offset, %$headers_parsed ) = extract_headers( $fh, $last_fetch );
-
-        # Append server-timing headers
-        my $tot = tv_interval($start) * 1000;
-        $headers_parsed->{'Server-Timing'} = "static;dur=$tot";
-
-        #XXX uwsgi just opens the file *again* when we already have a filehandle if it has a path.
-        # starman by comparison doesn't violate the principle of least astonishment here.
-        # This is probably a performance optimization, but makes the kind of micromanagement I need to do inconvenient.
-        # As such, we will just return a stream.
-        $self->INFO("GET 200 $headers_parsed->{'Content-Length'} $fullpath");
-
-        return sub {
-            my $responder = shift;
-
-            #push(@headers, 'Content-Length' => $sz);
-            my $writer = $responder->( [ $code, [%$headers_parsed] ] );
-            while ( $fh->read( my $buf, $CHUNK_SIZE ) ) {
-                $writer->write($buf);
-            }
-            close($fh) or $self->WARN("Could not close statics/$path: $!");
-            $writer->close;
-          }
-          if $streaming;
-
-        return [ $code, [%$headers_parsed], $fh ];
-    }
-    return $self->forbidden( $self->{current_query} );
-}
-
 =head2 get_config() = HASH
 
 TPSGI::Startup::get_config(): F<~/.tpsgi.ini>, over the defaults.
