@@ -497,6 +497,7 @@ sub serve_ranges {
 
         # Checked before the comparisons, which die on a word under fatal warnings.
         my $whole = List::Util::all { ( $_ // q{} ) =~ m{\A\d+\z} } @$range[ 0, 1 ];
+        $range->[1] = List::Util::min( $range->[1], $sz - 1 ) if $whole;
         if ( !$whole || $range->[0] > $sz || $range->[1] < 0 || $range->[0] > $range->[1] ) {
             $self->INFO("GET 416 $fullpath");
             return [ 416, [%headers], ["Requested range not satisfiable"] ];
@@ -510,7 +511,7 @@ sub serve_ranges {
             $headers{'Content-Length'} += length("$fc--$CHUNK_SEP\n$primary_ct\nContent-Range: bytes $range->[0]-$range->[1]/$sz\n\n");
             $fc = "\n";
         }
-        $headers{'Content-Length'} += length("\n--$CHUNK_SEP\--\n");
+        $headers{'Content-Length'} += length("\n--$CHUNK_SEP--\n");
         $fc = '';
     }
 
@@ -524,7 +525,7 @@ sub serve_ranges {
             $writer->write("$fc--$CHUNK_SEP\n$primary_ct\nContent-Range: bytes $range->[0]-$range->[1]/$sz\n\n") if $is_multipart;
             $fc = "\n";
 
-            my $len = List::Util::min( $sz, $range->[1] + 1 ) - $range->[0];
+            my $len = $range->[1] + 1 - $range->[0];
 
             $fh->seek( $range->[0], 0 );
             while ($len) {
