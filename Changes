@@ -8,3 +8,5 @@ Revision history for TPSGI
       wins, and parameters are validated and coerced by JSON::Validator.
       A path with a method that it has no route for is a 405, not a 400.
     - Remove static().  nginx serves the renders that save_render() makes.
+    - A suffix range, bytes=-N, gets the last N bytes, not a 500, and a
+      range whose ends are not whole numbers gets a 416.

@@ -463,6 +463,10 @@ size of the file, C<headers>, a HASH reference of the response headers so far,
 and C<fullpath>, the URL for the log.  More than one range is answered as
 multipart/byteranges.
 
+A suffix range, C<bytes=-N>, is the last N bytes, or the whole file when it is
+shorter than N.  C<bytes=-0>, and a range whose ends are not whole numbers, get
+the 416.
+
 =cut
 
 sub serve_ranges {
@@ -483,8 +487,17 @@ sub serve_ranges {
 
     # Calculate the content-length up-front.  We have to fix unspecified lengths first, and reject bad requests.
     foreach my $range (@$ranges) {
+
+        # parse_ranges() gives bytes=-N as ['', N].
+        if ( ( $range->[0] // 'none' ) eq q{} && ( $range->[1] // q{} ) =~ m{\A\d+\z} ) {
+            $range->[0] = List::Util::max( $sz - $range->[1], 0 );
+            $range->[1] = $sz - 1;
+        }
         $range->[1] //= $sz - 1;
-        if ( $range->[0] > $sz || $range->[0] < 0 || $range->[1] < 0 || $range->[0] > $range->[1] ) {
+
+        # Checked before the comparisons, which die on a word under fatal warnings.
+        my $whole = List::Util::all { ( $_ // q{} ) =~ m{\A\d+\z} } @$range[ 0, 1 ];
+        if ( !$whole || $range->[0] > $sz || $range->[1] < 0 || $range->[0] > $range->[1] ) {
             $self->INFO("GET 416 $fullpath");
             return [ 416, [%headers], ["Requested range not satisfiable"] ];
         }

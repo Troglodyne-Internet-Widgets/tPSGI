@@ -141,6 +141,41 @@ subtest 'serve_ranges' => sub {
     close($fh) or die "Cannot close: $!";
 };
 
+subtest 'serve_ranges, with a suffix range' => sub {
+    my $tpsgi = bless( { %options, ip => '0.0.0.0' }, 'TPSGI' );
+    my $file  = "$dir/ten-bytes";
+    Mojo::File->new($file)->spew('0123456789');
+
+    # The status, the headers and the body that a Range header gets.
+    my $answer = sub ($range) {
+        open( my $fh, '<', $file ) or die "Cannot read $file: $!";
+        my $res = $tpsgi->serve_ranges( $fh, [ TPSGI::parse_ranges( { HTTP_RANGE => $range } ) ], size => 10, headers => { 'Content-type' => 'text/plain' }, fullpath => '/ten-bytes' );
+        if ( ref $res eq 'ARRAY' ) {
+            close($fh) or die "Cannot close: $!";
+            return ( $res->[0], { @{ $res->[1] } }, undef );
+        }
+
+        my ( $status, %headers );
+        my $body   = q{};
+        my $writer = mock {} => ( add => [ write => sub ( $, $chunk ) { $body .= $chunk }, close => sub { } ] );
+        $res->( sub ($head) { ( $status, %headers ) = ( $head->[0], @{ $head->[1] } ); return $writer } );
+        return ( $status, \%headers, $body );
+    };
+
+    my ( $status, $headers, $body ) = $answer->('bytes=-3');
+    is( $status,                      206,            'bytes=-3 is a 206' );
+    is( $body,                        '789',          'of the last three bytes' );
+    is( $headers->{'Content-Range'},  'bytes 7-9/10', 'which Content-Range names' );
+    is( $headers->{'Content-Length'}, 3,              'and Content-Length counts' );
+
+    ( $status, $headers, $body ) = $answer->('bytes=-50');
+    is( [ $status, $body, $headers->{'Content-Range'} ], [ 206, '0123456789', 'bytes 0-9/10' ], 'a suffix longer than the file is the whole file' );
+
+    is( ( $answer->('bytes=-0') )[0],      416, 'bytes=-0 asks for nothing, so it is a 416' );
+    is( ( $answer->('bytes=-') )[0],       416, 'bytes=- is a 416' );
+    is( ( $answer->('bytes=abc-def') )[0], 416, 'and so is a range of words, which does not die' );
+};
+
 # Writes a router module into $dir, and returns its name relative to $dir.
 sub write_router {
     my ( $package, $body ) = @_;
