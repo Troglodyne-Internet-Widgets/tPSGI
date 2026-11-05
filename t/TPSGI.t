@@ -141,26 +141,29 @@ subtest 'serve_ranges' => sub {
     close($fh) or die "Cannot close: $!";
 };
 
-subtest 'serve_ranges, with a suffix range' => sub {
+# The status, the headers and the body that a Range header gets for a file of
+# ten bytes.
+sub range_answer ($range) {
     my $tpsgi = bless( { %options, ip => '0.0.0.0' }, 'TPSGI' );
     my $file  = "$dir/ten-bytes";
     Mojo::File->new($file)->spew('0123456789');
 
-    # The status, the headers and the body that a Range header gets.
-    my $answer = sub ($range) {
-        open( my $fh, '<', $file ) or die "Cannot read $file: $!";
-        my $res = $tpsgi->serve_ranges( $fh, [ TPSGI::parse_ranges( { HTTP_RANGE => $range } ) ], size => 10, headers => { 'Content-type' => 'text/plain' }, fullpath => '/ten-bytes' );
-        if ( ref $res eq 'ARRAY' ) {
-            close($fh) or die "Cannot close: $!";
-            return ( $res->[0], { @{ $res->[1] } }, undef );
-        }
+    open( my $fh, '<', $file ) or die "Cannot read $file: $!";
+    my $res = $tpsgi->serve_ranges( $fh, [ TPSGI::parse_ranges( { HTTP_RANGE => $range } ) ], size => 10, headers => { 'Content-type' => 'text/plain' }, fullpath => '/ten-bytes' );
+    if ( ref $res eq 'ARRAY' ) {
+        close($fh) or die "Cannot close: $!";
+        return ( $res->[0], { @{ $res->[1] } }, undef );
+    }
 
-        my ( $status, %headers );
-        my $body   = q{};
-        my $writer = mock {} => ( add => [ write => sub ( $, $chunk ) { $body .= $chunk }, close => sub { } ] );
-        $res->( sub ($head) { ( $status, %headers ) = ( $head->[0], @{ $head->[1] } ); return $writer } );
-        return ( $status, \%headers, $body );
-    };
+    my ( $status, %headers );
+    my $body   = q{};
+    my $writer = mock {} => ( add => [ write => sub ( $, $chunk ) { $body .= $chunk }, close => sub { } ] );
+    $res->( sub ($head) { ( $status, %headers ) = ( $head->[0], @{ $head->[1] } ); return $writer } );
+    return ( $status, \%headers, $body );
+}
+
+subtest 'serve_ranges, with a suffix range' => sub {
+    my $answer = \&range_answer;
 
     my ( $status, $headers, $body ) = $answer->('bytes=-3');
     is( $status,                      206,            'bytes=-3 is a 206' );
@@ -174,6 +177,28 @@ subtest 'serve_ranges, with a suffix range' => sub {
     is( ( $answer->('bytes=-0') )[0],      416, 'bytes=-0 asks for nothing, so it is a 416' );
     is( ( $answer->('bytes=-') )[0],       416, 'bytes=- is a 416' );
     is( ( $answer->('bytes=abc-def') )[0], 416, 'and so is a range of words, which does not die' );
+};
+
+subtest 'serve_ranges, with a range past the end of the file' => sub {
+    my ( $status, $headers, $body ) = range_answer('bytes=0-1048575');
+    is( $status,                      206,            'a range that ends past the file is a 206' );
+    is( $body,                        '0123456789',   'of the bytes up to the end' );
+    is( $headers->{'Content-Range'},  'bytes 0-9/10', 'which Content-Range names, ending at the last byte' );
+    is( $headers->{'Content-Length'}, 10,             'and Content-Length counts' );
+
+    ( $status, $headers, $body ) = range_answer('bytes=8-20');
+    is( [ $status, $body, $headers->{'Content-Range'}, $headers->{'Content-Length'} ], [ 206, '89', 'bytes 8-9/10', 2 ], 'a range that starts inside the file ends at its last byte' );
+
+    ( $status, $headers, $body ) = range_answer('bytes=9-9');
+    is( [ $status, $body ], [ 206, '9' ], 'the last byte alone is a 206' );
+
+    is( ( range_answer('bytes=10-19') )[0], 416, 'a range that starts at the size is a 416' );
+    is( ( range_answer('bytes=10-') )[0],   416, 'and so is one with no end' );
+
+    ( $status, $headers, $body ) = range_answer('bytes=0-1,8-50');
+    is( $status, 206, 'several ranges, one past the end, are a 206' );
+    like( $body, qr/Content-Range:[ ]bytes[ ]8-9\/10\n\n89\n/, 'whose part names the range up to the last byte' );
+    is( $headers->{'Content-Length'}, length $body, 'and Content-Length is the length of the body' );
 };
 
 # Writes a router module into $dir, and returns its name relative to $dir.
