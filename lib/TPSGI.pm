@@ -946,6 +946,10 @@ for, the query is not built, and the callback gets the request as %ENV
 instead.  respond() calls route(), with %request holding C<fullpath>, C<path>,
 C<start>, C<last_fetch>, C<deflate>, C<domain> and C<port>.
 
+C<query_string> in the query is the query string as the client sent it, still
+encoded, or an empty string when there is none.  A callback that sends the
+client to another host can pass it on unchanged.
+
 =cut
 
 sub route {
@@ -989,6 +993,7 @@ sub route {
     $query->{lang}           = $env->{HTTP_ACCEPT_LANGUAGE};
     $query->{accept}         = $env->{HTTP_ACCEPT};
     $query->{has_query}      = !!$env->{QUERY_STRING};
+    $query->{query_string}   = $env->{QUERY_STRING} // q{};
     $query->{domain}         = $request{domain};
     $query->{dispatcher}     = $operation;
     $query->{ip}             = $cur_query->{ip};

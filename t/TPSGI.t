@@ -273,6 +273,26 @@ subtest 'extract_query' => sub {
     is( $res->[0], 400, 'even when the path declares it' );
 };
 
+subtest 'route' => sub {
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
+
+    # The query that the callback of /post/x gets for $query_string.
+    my $query_of = sub ($query_string) {
+        my $match = $tpsgi->routes->match( 'GET', '/post/x' );
+        my $got;
+        $match->{callback} = sub ( $, $query ) { $got = $query; return [ 200, [], ['ok'] ] };
+        my %env = ( REQUEST_METHOD => 'GET', ( defined $query_string ? ( QUERY_STRING => $query_string ) : () ) );
+        $tpsgi->route( $match, \%env, fullpath => '/post/x', path => '/post/x', start => [ Time::HiRes::gettimeofday() ] );
+        return $got;
+    };
+
+    my $query = $query_of->('limit=5');
+    is( $query->{query_string}, 'limit=5', 'the callback gets the query string as the client sent it' );
+    ok( $query->{has_query}, 'beside has_query' );
+
+    is( $query_of->(undef)->{query_string}, q{}, 'a request without one gets an empty string, not undef' );
+};
+
 subtest 'respond, with a method that the path does not have' => sub {
     my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
     my $res   = $tpsgi->respond( { REQUEST_METHOD => 'POST', PATH_INFO => '/post/x', REQUEST_URI => '/post/x', HTTP_HOST => 'test.test' } );
