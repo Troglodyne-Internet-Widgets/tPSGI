@@ -50,8 +50,6 @@ sub main {
 }
 
 our $app = sub {
-    umask 0o022;
-
     # Change your dir into whatever basedir you need to be in
     chdir("$options{tpsgi_dir}/$options{basedir}") or die "Can't chdir into $options{tpsgi_dir}/$options{'basedir'}: $!";
 

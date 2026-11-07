@@ -25,6 +25,10 @@ ExecStart=__REPLACEME__/service/tpsgi.sh
 # outside it, so service/tpsgi.sh reads what it needs before that happens.
 ImportCredential=tpsgi-vault
 WorkingDirectory=__REPLACEME__/
+
+# The workers run as the group of the web server, so it reads the statics that
+# they write, and no other account reads anything that they write.
+UMask=0027
 Restart=always
 OOMPolicy=stop
 ExecReload=kill -HUP $MAINPID
