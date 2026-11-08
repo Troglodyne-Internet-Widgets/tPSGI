@@ -441,4 +441,22 @@ subtest 'serve, when it links a file into the statics' => sub {
     is( mode_of("$tpsgi_dir/www/static/deep"), sprintf( '%04o', 0o777 & ~$umask ), 'a directory that it makes takes its mode from the umask' );
 };
 
+subtest 'respond, with a path that climbs out of www/' => sub {
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
+    my $ask   = sub ($path) { return $tpsgi->respond( { REQUEST_METHOD => 'GET', PATH_INFO => $path, REQUEST_URI => $path, HTTP_HOST => 'test.test' } ) };
+
+    # respond() looks for a file under www/ of its cwd.
+    my $oldcwd = Cwd::getcwd();
+    File::Path::make_path("$dir/www");
+    open( my $fh, '>', "$dir/secret.txt" ) or die "Could not write $dir/secret.txt: $!";
+    close($fh)                             or die "Could not close $dir/secret.txt: $!";
+    chdir $dir                             or die "Could not chdir to $dir: $!";
+
+    is( $ask->('/../secret.txt')->[0],      400, 'is a 400, rather than the file above www/' );
+    is( $ask->('/a/../../secret.txt')->[0], 400, 'and so is one that climbs out further down' );
+    is( $ask->('/no..such..file.txt')->[0], 404, 'but two dots inside a name are only a name' );
+
+    chdir $oldcwd or die "Could not chdir back to $oldcwd: $!";
+};
+
 done_testing();

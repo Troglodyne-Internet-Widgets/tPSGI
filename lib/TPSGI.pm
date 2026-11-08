@@ -961,8 +961,8 @@ sub respond {
         tpsgi    => $self,
     };
 
-    # Paths with .. in them are not refused here, because starman appears to
-    # refuse them already.
+    # starman passes a .. through, and the file of such a path is outside www/.
+    return $self->badrequest($cur_query) if List::Util::any { $_ eq '..' } split m{/}, $path;
 
     # Support aliased paths
     my $aliases = $self->{aliases};

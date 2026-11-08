@@ -23,3 +23,5 @@ Revision history for TPSGI
       what tPSGI knows of the request, which the input cannot replace.  A
       router dies as it loads when an operation gives one name to two of
       them.
+    - A path with a .. segment gets a 400, rather than the file it names
+      outside www/.
