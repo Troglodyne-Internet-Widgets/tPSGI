@@ -319,25 +319,10 @@ sub new {
         $router;
     };
 
-    $self->{indices} //= [];
-    $self->{indices} = [ @{ $self->{indices} }, qw{index.html index.htm index.cgi} ];
-
     $self->{aliases}   = \%aliases;
     $self->{callbacks} = [];
 
     return $self;
-}
-
-=head2 indices() = ARRAYREF
-
-The directory index files, in the order they are tried: the C<indices> option,
-then F<index.html>, F<index.htm> and F<index.cgi>.
-
-=cut
-
-sub indices {
-    my $self = shift;
-    return $self->{indices};
 }
 
 =head2 routes() = TPSGI::Router
@@ -740,6 +725,9 @@ sub cannot_start {
 
 my %etags;
 
+# The files that answer for a directory, in the order that respond() tries them.
+my @dirindices = qw{index.html index.htm index.cgi};
+
 =head2 respond($env) = PSGI response
 
 Answer one request: from a route when one matches, by running a CGI when the
@@ -857,9 +845,9 @@ sub respond {
     my $file_actual;
     $file_actual = $file_possible if -e $file_possible && !-d _;
 
-    # Dirindices
+    # The file that answers for a directory.
     if ( -d $file_possible ) {
-        foreach my $index ( @{ $self->indices } ) {
+        foreach my $index (@dirindices) {
             next if $file_actual;
             my $dirindex = $self->mangle_filename("www$path/$index");
             $dirindex =~ s{//}{/}g;
@@ -1676,7 +1664,6 @@ Obeys ~/.tpsgi.ini -- this is what will control all the custom aspects mentioned
     verbose     : Whether to print all log messages or not
     custom_log  : Custom location for default (rotated) log
     routers     : Router module(s), separate with comma.  Relative to TPSGI install dir.
-    indices     : Dirindex files.  In addition to index.html, index.htm, index.cgi
     loggers     : Logger module(s), separate with comma.  Each is a Log::Dispatch::Output class.  tPSGI loads it by name, so it can live beside a router
     auth        : Authentication module
     domain      : Domain name of the application, used by things like service files
