@@ -855,7 +855,7 @@ sub respond {
         }
     }
 
-    my $file_is_cgi = appears_executable($file_actual);
+    my $file_is_cgi = $self->is_cgi($file_actual);
     return $self->cgi( $env, $fullpath, $file_actual, $last_fetch ) if $file_is_cgi;
 
     $self->INFO( "Attempting to serve $fullpath [" . ( $file_possible // "" ) . "]" );
@@ -910,7 +910,8 @@ my @executable_extensions = qw{cgi sh exe pl php py};
 =head2 appears_executable($path) = BOOL
 
 Whether $path is a CGI to run rather than a file to serve: it is executable,
-and it has no extension or one of C<cgi>, C<sh>, C<exe>, C<pl>, C<php> and C<py>.
+and its name has no extension or one of C<cgi>, C<sh>, C<exe>, C<pl>, C<php>
+and C<py>.  The extension is what follows the last dot of the name.
 
 =cut
 
@@ -920,10 +921,28 @@ sub appears_executable {
     # Definitely not executable if it does not exist!
     return 0 unless $subj;
     return 0 unless -x $subj;    ## no critic (ProhibitFiletest_rwxRWX) -- whether to run it, not whether we may
-    my ($extension) = $subj =~ m/[.](\S+)$/;
+    my ($extension) = basename($subj) =~ m/[.]([^.]+)\z/;
     return 1 if !$extension;
     return 1 if List::Util::any { $extension eq $_ } @executable_extensions;
     return 0;
+}
+
+=head2 is_cgi($path) = BOOL
+
+Whether tPSGI runs $path as a CGI: appears_executable() says that it is one,
+and it is inside a directory that C<cgi_dirs> names, relative to C<basedir>.
+C<cgi_dirs> names none by default, so tPSGI serves every file as it is,
+whatever its mode.  A path with a C<..> segment is never a CGI, since it
+could start inside one of them and end outside it.
+
+=cut
+
+sub is_cgi ( $self, $path ) {
+    return 0 unless appears_executable($path);
+    return 0 if List::Util::any { $_ eq '..' } split m{/}, $path;
+    my $file = $path =~ s{/+}{/}gr;
+    my @dirs = map { s{/+\z}{}r } @{ $self->{cgi_dirs} // [] };
+    return ( List::Util::any { index( $file, "$_/" ) == 0 } @dirs ) ? 1 : 0;
 }
 
 =head2 route($route, $env, %request) = PSGI response
@@ -1648,7 +1667,7 @@ application, with tarbaby on the PATH:
 
 A PSGI server built to migrate old mod_perl/apache stacks onto psgi, and that powers tCMS.
 
-Will execute any executable file (chmod +x) in www/ as CGI, and otherwise host any static file therein.
+Will execute an executable file (chmod +x) as CGI, in a directory that cgi_dirs names, and otherwise host any static file in www/.
 
 The idea here is as a bridge between old and new which allows you to modernize at your own pace, gradually turning CGIs into routes.
 
@@ -1664,6 +1683,7 @@ Obeys ~/.tpsgi.ini -- this is what will control all the custom aspects mentioned
     verbose     : Whether to print all log messages or not
     custom_log  : Custom location for default (rotated) log
     routers     : Router module(s), separate with comma.  Relative to TPSGI install dir.
+    cgi_dirs    : Directories, relative to basedir, whose executable files run as CGI, as www/cgi-bin.  Separate with comma.  None by default.
     loggers     : Logger module(s), separate with comma.  Each is a Log::Dispatch::Output class.  tPSGI loads it by name, so it can live beside a router
     auth        : Authentication module
     domain      : Domain name of the application, used by things like service files

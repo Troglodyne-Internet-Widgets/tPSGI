@@ -12,3 +12,5 @@ Revision history for TPSGI
       range whose ends are not whole numbers gets a 416.
     - Remove the indices option, which get_config() never read.  A directory
       is answered by its index.html, index.htm or index.cgi, as before.
+    - Run a CGI only from a directory that cgi_dirs names, and none by
+      default.  An executable file anywhere else in www/ is served as it is.

@@ -23,6 +23,7 @@ tpsgi obeys a config file, ~/.tpsgi.ini which is in Config::Simple (key=value) f
     verbose     # Whether to print all log messages or not
     custom_log  # Custom location for default (rotated) log
     routers     # Router module(s), separate with comma.  Relative to TPSGI install dir.
+    cgi_dirs    # Directories, relative to basedir, whose executable files run as CGI, as www/cgi-bin.  None by default.
     loggers     # Logger module(s), separate with comma.  Loaded by name, from beside a router or @INC
     auth        # Authentication module
     domain      # Domain name of the application, used by things like service files
