@@ -433,8 +433,8 @@ sub serve {    ## no critic (ProhibitManyArgs) -- routers call it with these, in
             File::Path::make_path( $target_dir, { user => $<, group => $self->{gid}, chmod => 0o755 } ) or die "Could not make dir $target_dir";
         }
 
-        # hardlink to save disk space.  One that is there already is this file.
-        # TODO figure out cache invalidation, I guess check mtime/hash
+        # hardlink to save disk space.  One that is there already is this file,
+        # since TPSGI::Startup::sweep_statics() removes one that went stale.
         if ( link $path, $static_path ) {
             $self->INFO("Copying $path to $static_path");
         }

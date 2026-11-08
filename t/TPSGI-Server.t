@@ -49,6 +49,29 @@ subtest 'accept' => sub {
     is( server()->accept(), 1, 'an ordinary accept is passed through' );
 };
 
+subtest 'pre_loop_hook and sig_hup' => sub {
+    my $startup = Test::MockModule->new('TPSGI::Startup');
+    my @swept;
+    $startup->redefine( get_config    => sub { return ( tpsgi_dir => '/bogus', basedir => 'app' ) } );
+    $startup->redefine( sweep_statics => sub (%options) { push @swept, \%options; return ('/bogus/www/static/stale.css') } );
+
+    my $starman = Test::MockModule->new('Starman::Server');
+    my @ran;
+    $starman->redefine( pre_loop_hook => sub { push @ran, [ pre_loop_hook => scalar @swept ]; return 'started' } );
+    $starman->redefine( sig_hup       => sub { push @ran, [ sig_hup       => scalar @swept ]; return 'hupped' } );
+
+    my $net = Test::MockModule->new('Net::Server');
+    my @logged;
+    $net->redefine( log => sub ( $, $level, $message ) { push @logged, $message } );
+
+    my $self = server();
+    is( $self->pre_loop_hook(), 'started',                                                        "the parent starts as Starman's does" );
+    is( $self->sig_hup(),       'hupped',                                                         "and takes a HUP as Starman's does" );
+    is( \@ran,                  [ [ pre_loop_hook => 1 ], [ sig_hup => 2 ] ],                     'after a sweep of the statics, each time' );
+    is( $swept[0],              { tpsgi_dir => '/bogus', basedir => 'app' },                      'of the install that the configuration names' );
+    is( \@logged,               [ ('Removed the stale static /bogus/www/static/stale.css') x 2 ], 'and it logs each static that it removed' );
+};
+
 subtest 'every connection is answered while the parent is HUPed' => sub {
     skip_all('RELEASE_TESTING not set') unless $ENV{RELEASE_TESTING};
 
