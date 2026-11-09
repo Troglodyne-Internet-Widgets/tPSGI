@@ -6,6 +6,8 @@ use re '/aasx';
 use Test2::V0;
 use Test2::Plugin::NoWarnings;
 
+use Cwd        ();
+use File::Path ();
 use File::Temp qw{tempdir};
 use Mojo::File ();
 use Test::MockModule;
@@ -298,6 +300,35 @@ subtest 'respond, with a method that the path does not have' => sub {
     my $res   = $tpsgi->respond( { REQUEST_METHOD => 'POST', PATH_INFO => '/post/x', REQUEST_URI => '/post/x', HTTP_HOST => 'test.test' } );
     is( $res->[0],                   405,         'is a 405' );
     is( { @{ $res->[1] } }->{Allow}, 'GET, HEAD', 'which names the methods it has' );
+};
+
+subtest 'is_cgi' => sub {
+    my $oldcwd = Cwd::getcwd();
+    chdir $dir or die "Could not chdir to $dir: $!";
+
+    # Every one of these is executable, as a restore or a checkout can leave an asset.
+    File::Path::make_path(qw{www/cgi-bin/v1.2 www/cgi-bin-other www/assets});
+    foreach my $file (qw{www/cgi-bin/run www/cgi-bin/v1.2/run www/cgi-bin/style.css www/cgi-bin-other/run www/assets/upload.pl www/assets/run}) {
+        open( my $fh, '>', $file ) or die "Could not write $file: $!";
+        close($fh)                 or die "Could not close $file: $!";
+        chmod( 0o755, $file )      or die "Could not chmod $file: $!";
+    }
+
+    my $none = bless( {}, 'TPSGI' );
+    is( $none->is_cgi('www/cgi-bin/run'), 0, 'with no cgi_dirs, nothing runs as a CGI, whatever its mode' );
+
+    my $tpsgi = bless( { cgi_dirs => [ 'www/cgi-bin/', 'www/missing' ] }, 'TPSGI' );
+    is( $tpsgi->is_cgi('www/cgi-bin/run'),       1, 'an executable inside a directory that cgi_dirs names runs, whatever slash ends the name' );
+    is( $tpsgi->is_cgi('www//cgi-bin/run'),      1, 'and a path with a doubled slash is the same path' );
+    is( $tpsgi->is_cgi('www/cgi-bin/v1.2/run'),  1, 'and a dot in a directory is no extension of the file' );
+    is( $tpsgi->is_cgi('www/cgi-bin/style.css'), 0, 'but a file with no CGI extension there does not' );
+    is( $tpsgi->is_cgi('www/assets/upload.pl'),  0, 'and an executable script outside them does not' );
+    is( $tpsgi->is_cgi('www/assets/run'),        0, 'nor an executable with no extension' );
+    is( $tpsgi->is_cgi('www/cgi-bin-other/run'), 0, 'nor one in a directory that only starts with the same name' );
+    is( $tpsgi->is_cgi('www/cgi-bin/../assets/upload.pl'), 0, 'nor one that a path climbs to out of a directory that cgi_dirs names' );
+    is( $tpsgi->is_cgi(undef),                   0, 'and no file is no CGI' );
+
+    chdir $oldcwd or die "Could not chdir back to $oldcwd: $!";
 };
 
 done_testing();

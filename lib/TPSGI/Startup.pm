@@ -57,6 +57,7 @@ sub get_config {
         domain     => '',
         user       => '',
         binds      => [],
+        cgi_dirs   => [],
         basedir    => '.',
         http_user  => '',
         tpsgi_dir  => Cwd::getcwd(),

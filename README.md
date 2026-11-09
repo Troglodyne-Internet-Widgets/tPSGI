@@ -44,7 +44,7 @@ tpsgi ... [starman args]
 
 A PSGI server built to migrate old mod\_perl/apache stacks onto psgi, and that powers tCMS.
 
-Will execute any executable file (chmod +x) in www/ as CGI, and otherwise host any static file therein.
+Will execute an executable file (chmod +x) as CGI, in a directory that cgi_dirs names, and otherwise host any static file in www/.
 
 The idea here is as a bridge between old and new which allows you to modernize at your own pace, gradually turning CGIs into routes.
 
@@ -349,6 +349,7 @@ Obeys ~/.tpsgi.ini -- this is what will control all the custom aspects mentioned
 verbose     : Whether to print all log messages or not
 custom_log  : Custom location for default (rotated) log
 routers     : Router module(s), separate with comma.  Relative to TPSGI install dir.
+cgi_dirs    : Directories, relative to basedir, whose executable files run as CGI, as www/cgi-bin.  Separate with comma.  None by default.
 loggers     : Logger module(s), separate with comma.  Each is a Log::Dispatch::Output class.  tPSGI loads it by name, so it can live beside a router
 auth        : Authentication module
 domain      : Domain name of the application, used by things like service files
