@@ -8,6 +8,8 @@ use re '/aasx';
 
 use parent qw{Starman::Server};
 
+use TPSGI::Startup ();
+
 =head1 TPSGI::Server
 
 Starman::Server, with workers that answer every connection they accept before
@@ -72,6 +74,32 @@ sub accept {    ## no critic (ProhibitBuiltinHomonyms) -- Net::Server's method, 
 
     return 1 if $self->SUPER::accept(@_);
     return $prop->{client} ? 1 : 0;
+}
+
+=head2 pre_loop_hook, sig_hup
+
+Starman's, after TPSGI::Startup::sweep_statics() removes the statics that an
+update left stale.  Both run in the parent, once when it starts and once at
+each HUP, which restarts the workers and does not run the parent again.
+
+=cut
+
+my sub sweep_statics ($self) {
+    my @removed = TPSGI::Startup::sweep_statics( TPSGI::Startup::get_config() );
+    $self->log( 2, "Removed the stale static $_" ) foreach @removed;
+    return;
+}
+
+sub pre_loop_hook {
+    my $self = shift;
+    sweep_statics($self);
+    return $self->SUPER::pre_loop_hook(@_);
+}
+
+sub sig_hup {
+    my $self = shift;
+    sweep_statics($self);
+    return $self->SUPER::sig_hup(@_);
 }
 
 1;

@@ -13,6 +13,7 @@ use re '/aasx';
 use Cwd;
 use File::Basename qw{dirname};
 use File::Find;
+use File::Spec;
 use List::Util   qw{first};
 use Scalar::Util qw{refaddr};
 use Linux::Perl::inotify;
@@ -86,6 +87,46 @@ sub get_config {
     $options{log_name} = $LOGNAME;
 
     return %options;
+}
+
+=head2 sweep_statics(%options) = LIST
+
+Remove each file under F<www/static> of C<tpsgi_dir> whose file of the same
+path under F<www/> of C<basedir> is now a different file, and return the paths
+that it removed.  C<%options> is what get_config() returns.
+
+serve() links a file of F<www/> into F<www/static>, and nginx answers every
+later request for it from the link, so a file replaced since then would be
+served as it was.  With the link gone, the next request reaches serve(), which
+links the new file.  A render, and a link whose file is gone, have no file
+under F<www/>, so they stay.  Dies if it cannot remove a stale file.
+
+=cut
+
+sub sweep_statics (%options) {
+    my $static = "$options{tpsgi_dir}/www/static";
+    my $source = "$options{tpsgi_dir}/$options{basedir}/www";
+    return () unless -d $static;
+
+    my @removed;
+    File::Find::find(
+        {
+            no_chdir => 1,
+            wanted   => sub {
+                my $path   = $File::Find::name;
+                my @linked = lstat $path or return;
+                return if -d _ || -l _;
+
+                my @file = stat( $source . '/' . File::Spec->abs2rel( $path, $static ) ) or return;
+                return if $file[0] == $linked[0] && $file[1] == $linked[1];
+
+                unlink $path or die "Could not remove the stale static $path: $!\n";
+                push @removed, $path;
+            },
+        },
+        $static
+    );
+    return @removed;
 }
 
 =head2 watch_for_changes(@dirs)
