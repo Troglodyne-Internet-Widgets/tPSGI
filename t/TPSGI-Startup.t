@@ -47,17 +47,21 @@ subtest 'sweep_statics' => sub {
     link( "$root/app/www/styles/deleted.css", "$root/www/static/styles/deleted.css" ) or die $!;
     unlink "$root/app/www/styles/deleted.css"                                         or die $!;
 
-    my @removed = sort( TPSGI::Startup::sweep_statics(%options) );
+    my @removed = TPSGI::Startup::sweep_statics(%options);
+    is( \@removed, ["$root/www/static/styles/replaced.css"], 'the link to a file that an update replaced is removed, and returned' );
+    ok( !-e "$root/www/static/styles/replaced.css", 'so nginx sends the next request for the link to serve()' );
+    is( read_file("$root/www/static/page.html"), 'a render', 'a render stays without renders' );
+
+    @removed = sort( TPSGI::Startup::sweep_statics( %options, renders => 1 ) );
     is(
         \@removed,
-        [ map { "$root/www/static/$_" } qw{page.html styles/deleted.css styles/replaced.css} ],
-        'the link to a file that an update replaced, the link to a deleted file and the render are removed, and returned'
+        [ map { "$root/www/static/$_" } qw{page.html styles/deleted.css} ],
+        'with renders, the render and the link to a deleted file are removed, and returned'
     );
-    ok( !-e "$root/www/static/styles/replaced.css", 'so nginx sends the next request for the link to serve()' );
-    ok( !-e "$root/www/static/page.html",           'and the next request for the render to its route' );
+    ok( !-e "$root/www/static/page.html", 'so nginx sends the next request for the render to its route' );
     is( read_file("$root/www/static/styles/kept.css"), 'kept as it was', 'a link to a file that is unchanged stays' );
 
-    is( [ TPSGI::Startup::sweep_statics(%options) ],                                     [], 'a second sweep finds nothing' );
+    is( [ TPSGI::Startup::sweep_statics( %options, renders => 1 ) ], [], 'a second sweep finds nothing' );
     is( [ TPSGI::Startup::sweep_statics( tpsgi_dir => "$root/bogus", basedir => '.' ) ], [], 'and an install with no statics is nothing to sweep' );
 };
 

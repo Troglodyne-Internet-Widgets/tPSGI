@@ -28,6 +28,8 @@ my $tpsgi = bless(
         log_dir    => "$tmp/log",
         log_name   => "$tmp/log/tpsgi.log",
         callbacks  => [],
+        tpsgi_dir  => $tmp,
+        basedir    => 'app',
     },
     'TPSGI'
 );
@@ -208,9 +210,15 @@ subtest 'libdir watches still drive autoreload' => sub {
     print {$fh} "# poke\n";
     close($fh) or die "Cannot close: $!";
 
+    make_path("$tmp/www/static");
+    open( $fh, '>', "$tmp/www/static/page.html" ) or die $!;
+    print {$fh} "rendered by the old code\n";
+    close($fh) or die "Cannot close: $!";
+
     $tpsgi->{autoreload} = 1;
     $tpsgi->handle_changes();
-    ok( $restarted, "a changed .pm in a libdir signals a restart" );
+    ok( $restarted,                      "a changed .pm in a libdir signals a restart" );
+    ok( !-e "$tmp/www/static/page.html", "and removes the renders that the old code made" );
 
     # And the app-facing watches don't get roped into that.
     $restarted = 0;

@@ -79,21 +79,27 @@ sub accept {    ## no critic (ProhibitBuiltinHomonyms) -- Net::Server's method, 
 =head2 pre_loop_hook, sig_hup
 
 Starman's, after TPSGI::Startup::sweep_statics() removes the statics that an
-update left stale, and the renders that the code before it made.  Both run in
-the parent, once when it starts and once at each HUP, which restarts the
-workers and does not run the parent again.
+update left stale.  Both run in the parent: pre_loop_hook once, when it starts,
+and sig_hup at each HUP, which restarts the workers and does not run the
+parent again.
+
+pre_loop_hook also removes every render, because the code can have changed
+while the server was down.  sig_hup leaves the renders, because an application
+sends a HUP when it saves its data, and removes the renders that the save
+changed.  When autoreload restarts the server for changed code,
+TPSGI::handle_changes() removes them.
 
 =cut
 
-my sub sweep_statics ($self) {
-    my @removed = TPSGI::Startup::sweep_statics( TPSGI::Startup::get_config() );
+my sub sweep_statics ( $self, %options ) {
+    my @removed = TPSGI::Startup::sweep_statics( TPSGI::Startup::get_config(), %options );
     $self->log( 2, "Removed the stale static $_" ) foreach @removed;
     return;
 }
 
 sub pre_loop_hook {
     my $self = shift;
-    sweep_statics($self);
+    sweep_statics( $self, renders => 1 );
     return $self->SUPER::pre_loop_hook(@_);
 }
 
