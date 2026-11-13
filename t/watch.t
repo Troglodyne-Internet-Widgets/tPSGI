@@ -28,6 +28,8 @@ my $tpsgi = bless(
         log_dir    => "$tmp/log",
         log_name   => "$tmp/log/tpsgi.log",
         callbacks  => [],
+        tpsgi_dir  => $tmp,
+        basedir    => 'app',
     },
     'TPSGI'
 );
@@ -227,6 +229,32 @@ subtest 'libdir watches still drive autoreload' => sub {
 
     TPSGI::Startup::remove_watch($data);
     $tpsgi->{autoreload} = 0;
+};
+
+subtest 'a changed module in a libdir removes the renders, with autoreload off' => sub {
+    my $libdir = "$tmp/lib";
+    make_path("$tmp/www/static/posts");
+    foreach my $render ( "$tmp/www/static/index.html", "$tmp/www/static/posts/p.html" ) {
+        open( my $fh, '>', $render ) or die $!;
+        print {$fh} "rendered by the old code\n";
+        close($fh) or die "Cannot close: $!";
+    }
+
+    my $restarted = 0;
+    my $mock      = Test::MockModule->new('TPSGI');
+    $mock->redefine( signal_restart_parent => sub { $restarted++ } );
+
+    $tpsgi->handle_changes();
+    ok( -e "$tmp/www/static/index.html", 'a render stays while no module changed' );
+
+    open( my $fh, '>>', "$libdir/Fake.pm" ) or die $!;
+    print {$fh} "# poke again\n";
+    close($fh) or die "Cannot close: $!";
+
+    $tpsgi->handle_changes();
+    ok( !-e "$tmp/www/static/index.html",   'the render of the front page is removed' );
+    ok( !-e "$tmp/www/static/posts/p.html", 'and so is a render in a subdirectory' );
+    ok( !$restarted,                        'but nothing restarts, since autoreload is off' );
 };
 
 done_testing();

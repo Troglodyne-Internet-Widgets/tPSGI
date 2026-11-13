@@ -41,14 +41,21 @@ subtest 'sweep_statics' => sub {
     unlink "$root/app/www/styles/replaced.css" or die $!;
     write_file( "$root/app/www/styles/replaced.css", 'replaced as it is now' );
 
-    # A render, which no file of the app's www/ stands behind.
-    write_file( "$root/www/static/page.html", 'a render' );
+    # A render, which no file of the app's www/ stands behind, and a link whose file is gone.
+    write_file( "$root/www/static/page.html",       'a render' );
+    write_file( "$root/app/www/styles/deleted.css", 'deleted' );
+    link( "$root/app/www/styles/deleted.css", "$root/www/static/styles/deleted.css" ) or die $!;
+    unlink "$root/app/www/styles/deleted.css"                                         or die $!;
 
-    my @removed = TPSGI::Startup::sweep_statics(%options);
-    is( \@removed, ["$root/www/static/styles/replaced.css"], 'the link to a file that an update replaced is removed, and returned' );
-    ok( !-e "$root/www/static/styles/replaced.css", 'so nginx sends the next request for it to serve()' );
+    my @removed = sort( TPSGI::Startup::sweep_statics(%options) );
+    is(
+        \@removed,
+        [ map { "$root/www/static/$_" } qw{page.html styles/deleted.css styles/replaced.css} ],
+        'the link to a file that an update replaced, the link to a deleted file and the render are removed, and returned'
+    );
+    ok( !-e "$root/www/static/styles/replaced.css", 'so nginx sends the next request for the link to serve()' );
+    ok( !-e "$root/www/static/page.html",           'and the next request for the render to its route' );
     is( read_file("$root/www/static/styles/kept.css"), 'kept as it was', 'a link to a file that is unchanged stays' );
-    is( read_file("$root/www/static/page.html"),       'a render',       'and so does a render' );
 
     is( [ TPSGI::Startup::sweep_statics(%options) ],                                     [], 'a second sweep finds nothing' );
     is( [ TPSGI::Startup::sweep_statics( tpsgi_dir => "$root/bogus", basedir => '.' ) ], [], 'and an install with no statics is nothing to sweep' );
