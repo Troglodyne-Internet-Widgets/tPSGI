@@ -79,8 +79,9 @@ sub accept {    ## no critic (ProhibitBuiltinHomonyms) -- Net::Server's method, 
 =head2 pre_loop_hook, sig_hup
 
 Starman's, after TPSGI::Startup::sweep_statics() removes the statics that an
-update left stale.  Both run in the parent, once when it starts and once at
-each HUP, which restarts the workers and does not run the parent again.
+update left stale, and the renders that the code before it made.  Both run in
+the parent, once when it starts and once at each HUP, which restarts the
+workers and does not run the parent again.
 
 =cut
 

@@ -92,15 +92,19 @@ sub get_config {
 
 =head2 sweep_statics(%options) = LIST
 
-Remove each file under F<www/static> of C<tpsgi_dir> whose file of the same
-path under F<www/> of C<basedir> is now a different file, and return the paths
-that it removed.  C<%options> is what get_config() returns.
+Remove each file under F<www/static> of C<tpsgi_dir> that is not a link to the
+file of the same path under F<www/> of C<basedir>, as that file is now, and
+return the paths that it removed.  C<%options> is what get_config() returns,
+or any hash with C<tpsgi_dir> and C<basedir>.
 
 serve() links a file of F<www/> into F<www/static>, and nginx answers every
 later request for it from the link, so a file replaced since then would be
-served as it was.  With the link gone, the next request reaches serve(), which
-links the new file.  A render, and a link whose file is gone, have no file
-under F<www/>, so they stay.  Dies if it cannot remove a stale file.
+served as it was.  save_render() writes what a route returned into
+F<www/static>, and nginx serves that the same way, so a render made by code
+that has changed since would be served as that code made it.  A render has no
+file under F<www/>, so the sweep removes every render, and every link whose
+file is gone.  With the file gone, the next request reaches serve() or the
+route, which makes it again.  Dies if it cannot remove a file.
 
 =cut
 
@@ -118,8 +122,8 @@ sub sweep_statics (%options) {
                 my @linked = lstat $path or return;
                 return if -d _ || -l _;
 
-                my @file = stat( $source . '/' . File::Spec->abs2rel( $path, $static ) ) or return;
-                return if $file[0] == $linked[0] && $file[1] == $linked[1];
+                my @file = stat( $source . '/' . File::Spec->abs2rel( $path, $static ) );
+                return if @file && $file[0] == $linked[0] && $file[1] == $linked[1];
 
                 unlink $path or die "Could not remove the stale static $path: $!\n";
                 push @removed, $path;
