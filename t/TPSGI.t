@@ -339,4 +339,46 @@ subtest 'is_cgi' => sub {
     chdir $oldcwd or die "Could not chdir back to $oldcwd: $!";
 };
 
+# The umask that service/tpsgi.tmpl gives the workers.
+my $umask  = 0o027;
+my ($egid) = split ' ', $);
+
+sub mode_of ($path) {
+    return sprintf( '%04o', ( stat $path )[2] & 0o7777 );
+}
+
+subtest 'save_render' => sub {
+    my $tpsgi_dir = tempdir( CLEANUP => 1 );
+    my $tpsgi     = bless( { %options, ip => '0.0.0.0', tpsgi_dir => $tpsgi_dir }, 'TPSGI' );
+
+    my $old = umask $umask;
+    $tpsgi->save_render(qw{/posts/ html <p>render</p>});
+    umask $old;
+
+    my $file = "$tpsgi_dir/www/static/posts/index.html";
+    is( Mojo::File->new($file)->slurp,          '<p>render</p>',                    'writes the render under www/static' );
+    is( mode_of($file),                         sprintf( '%04o', 0o666 & ~$umask ), 'a render takes its mode from the umask, and is no executable' );
+    is( mode_of("$tpsgi_dir/www/static/posts"), sprintf( '%04o', 0o777 & ~$umask ), 'and so does a directory that it makes' );
+    is( ( stat $file )[5],                      $egid,                              'and its group is the one the worker runs as, which the web server reads it through' );
+};
+
+subtest 'serve, when it links a file into the statics' => sub {
+    my $tpsgi_dir = tempdir( CLEANUP => 1 );
+    my $tpsgi     = bless( { %options, ip => '0.0.0.0', tpsgi_dir => $tpsgi_dir }, 'TPSGI' );
+
+    my $oldcwd = Cwd::getcwd();
+    chdir $tpsgi_dir or die "Could not chdir to $tpsgi_dir: $!";
+    File::Path::make_path('www/deep');
+    Mojo::File->new('www/deep/page.txt')->spew('page');
+
+    my $old = umask $umask;
+    my $res = $tpsgi->serve( '/deep/page.txt', 'www/deep/page.txt', [ Time::HiRes::gettimeofday() ], 0, [], 0, 1 );
+    umask $old;
+    chdir $oldcwd or die "Could not chdir back to $oldcwd: $!";
+
+    is( $res->[0], 200, 'serves the file' );
+    ok( -e "$tpsgi_dir/www/static/deep/page.txt", 'and links it into the statics' );
+    is( mode_of("$tpsgi_dir/www/static/deep"), sprintf( '%04o', 0o777 & ~$umask ), 'a directory that it makes takes its mode from the umask' );
+};
+
 done_testing();

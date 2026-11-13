@@ -415,7 +415,7 @@ sub serve {    ## no critic (ProhibitManyArgs) -- routers call it with these, in
 
         my $target_dir = dirname($static_path);
         if ( !-d $target_dir ) {
-            File::Path::make_path( $target_dir, { user => $<, group => $self->{gid}, chmod => 0o755 } ) or die "Could not make dir $target_dir";
+            File::Path::make_path($target_dir) or die "Could not make dir $target_dir";
         }
 
         # hardlink to save disk space.  One that is there already is this file,
@@ -1372,6 +1372,9 @@ Good to queue after closing stdout.
 Passed file extension slapped on the end of the path.
 You can then serve them as statics with an appropriately done try_files block in nginx.
 
+A render and the directories made for it take their modes from the umask, and their group
+from the worker, so the web server reads them when the worker runs as its group.
+
 =cut
 
 # Remove one static render.
@@ -1406,7 +1409,7 @@ sub save_render {
 
     my $path2file = "$self->{tpsgi_dir}/www/static/" . dirname($path_fixed);
     if ( !-d $path2file ) {
-        File::Path::make_path( $path2file, { user => $<, group => $self->{gid}, chmod => 0o755 } ) or die "Could not create directory $path2file";
+        File::Path::make_path($path2file) or die "Could not create directory $path2file";
     }
     my $file = "$self->{tpsgi_dir}/www/static/$path_fixed";
 
@@ -1416,8 +1419,6 @@ sub save_render {
     open( my $fh, '>', $file ) or die "Could not open $file for writing";
     print {$fh} $body;
     close($fh) or die "Could not write $file: $!";
-    chmod( 0755, $file );
-    chown( $<, $self->{gid}, $file );
     return;
 }
 
