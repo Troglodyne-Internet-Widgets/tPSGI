@@ -254,7 +254,7 @@ sub new {
     die "Must set tpsgi_dir in options"                                    unless $options{tpsgi_dir};
 
     my $gid = getgrnam( $options{http_user} );
-    die "No such user $options{http_user}" unless $gid;
+    die "No such user $options{http_user}" unless defined $gid;
     $options{gid} = $gid;
 
     my $self = bless( \%options, $class );
