@@ -247,6 +247,14 @@ subtest 'new' => sub {
     my $first = TPSGI->new( %new_options, routers => [$router] );
     is( $first->routes->match( 'GET', '/post/hello' )->{template}, '/post/{slug}', 'a router with %openapi routes' );
     ref_is( TPSGI->new( %new_options, routers => [$router] )->routes, $first->routes, 'and the next request in the worker reuses the router' );
+
+    my $gid_zero = getgrgid(0);
+    is( TPSGI->new( %new_options, http_user => $gid_zero, routers => [$router] )->{gid}, 0, "an http_user whose group is gid 0 ($gid_zero) is a group, not a missing one" );
+    like(
+        dies { TPSGI->new( %new_options, http_user => 'bogus-no-such-group', routers => [$router] ) },
+        qr/No[ ]such[ ]user[ ]bogus-no-such-group/,
+        'an http_user with no group dies'
+    );
 };
 
 subtest 'extract_query' => sub {
@@ -318,15 +326,15 @@ subtest 'is_cgi' => sub {
     is( $none->is_cgi('www/cgi-bin/run'), 0, 'with no cgi_dirs, nothing runs as a CGI, whatever its mode' );
 
     my $tpsgi = bless( { cgi_dirs => [ 'www/cgi-bin/', 'www/missing' ] }, 'TPSGI' );
-    is( $tpsgi->is_cgi('www/cgi-bin/run'),       1, 'an executable inside a directory that cgi_dirs names runs, whatever slash ends the name' );
-    is( $tpsgi->is_cgi('www//cgi-bin/run'),      1, 'and a path with a doubled slash is the same path' );
-    is( $tpsgi->is_cgi('www/cgi-bin/v1.2/run'),  1, 'and a dot in a directory is no extension of the file' );
-    is( $tpsgi->is_cgi('www/cgi-bin/style.css'), 0, 'but a file with no CGI extension there does not' );
-    is( $tpsgi->is_cgi('www/assets/upload.pl'),  0, 'and an executable script outside them does not' );
-    is( $tpsgi->is_cgi('www/assets/run'),        0, 'nor an executable with no extension' );
-    is( $tpsgi->is_cgi('www/cgi-bin-other/run'), 0, 'nor one in a directory that only starts with the same name' );
+    is( $tpsgi->is_cgi('www/cgi-bin/run'),                 1, 'an executable inside a directory that cgi_dirs names runs, whatever slash ends the name' );
+    is( $tpsgi->is_cgi('www//cgi-bin/run'),                1, 'and a path with a doubled slash is the same path' );
+    is( $tpsgi->is_cgi('www/cgi-bin/v1.2/run'),            1, 'and a dot in a directory is no extension of the file' );
+    is( $tpsgi->is_cgi('www/cgi-bin/style.css'),           0, 'but a file with no CGI extension there does not' );
+    is( $tpsgi->is_cgi('www/assets/upload.pl'),            0, 'and an executable script outside them does not' );
+    is( $tpsgi->is_cgi('www/assets/run'),                  0, 'nor an executable with no extension' );
+    is( $tpsgi->is_cgi('www/cgi-bin-other/run'),           0, 'nor one in a directory that only starts with the same name' );
     is( $tpsgi->is_cgi('www/cgi-bin/../assets/upload.pl'), 0, 'nor one that a path climbs to out of a directory that cgi_dirs names' );
-    is( $tpsgi->is_cgi(undef),                   0, 'and no file is no CGI' );
+    is( $tpsgi->is_cgi(undef),                             0, 'and no file is no CGI' );
 
     chdir $oldcwd or die "Could not chdir back to $oldcwd: $!";
 };
