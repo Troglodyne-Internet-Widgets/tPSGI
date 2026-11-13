@@ -68,7 +68,8 @@ subtest 'pre_loop_hook and sig_hup' => sub {
     is( $self->pre_loop_hook(), 'started',                                                        "the parent starts as Starman's does" );
     is( $self->sig_hup(),       'hupped',                                                         "and takes a HUP as Starman's does" );
     is( \@ran,                  [ [ pre_loop_hook => 1 ], [ sig_hup => 2 ] ],                     'after a sweep of the statics, each time' );
-    is( $swept[0],              { tpsgi_dir => '/bogus', basedir => 'app' },                      'of the install that the configuration names' );
+    is( $swept[0],              { tpsgi_dir => '/bogus', basedir => 'app', renders => 1 },        'of the install that the configuration names, with its renders when it starts' );
+    is( $swept[1],              { tpsgi_dir => '/bogus', basedir => 'app' },                      'but without them at a HUP, which an application sends when it saves its data' );
     is( \@logged,               [ ('Removed the stale static /bogus/www/static/stale.css') x 2 ], 'and it logs each static that it removed' );
 };
 

@@ -92,19 +92,21 @@ sub get_config {
 
 =head2 sweep_statics(%options) = LIST
 
-Remove each file under F<www/static> of C<tpsgi_dir> that is not a link to the
-file of the same path under F<www/> of C<basedir>, as that file is now, and
-return the paths that it removed.  C<%options> is what get_config() returns,
-or any hash with C<tpsgi_dir> and C<basedir>.
+Remove each file under F<www/static> of C<tpsgi_dir> that is a link to the file
+of the same path under F<www/> of C<basedir>, where that file has since been
+replaced, and return the paths that it removed.  With a true C<renders>, also
+remove every other file there that is not a link to the current file: every
+render, and every link whose file is gone.  C<%options> is what get_config()
+returns, or any hash with C<tpsgi_dir> and C<basedir>, and C<renders>.
 
 serve() links a file of F<www/> into F<www/static>, and nginx answers every
 later request for it from the link, so a file replaced since then would be
 served as it was.  save_render() writes what a route returned into
 F<www/static>, and nginx serves that the same way, so a render made by code
 that has changed since would be served as that code made it.  A render has no
-file under F<www/>, so the sweep removes every render, and every link whose
-file is gone.  With the file gone, the next request reaches serve() or the
-route, which makes it again.  Dies if it cannot remove a file.
+file under F<www/>, so only C<renders> can tell it from a link whose file is
+gone.  With the file gone, the next request reaches serve() or the route,
+which makes it again.  Dies if it cannot remove a file.
 
 =cut
 
@@ -123,6 +125,7 @@ sub sweep_statics (%options) {
                 return if -d _ || -l _;
 
                 my @file = stat( $source . '/' . File::Spec->abs2rel( $path, $static ) );
+                return if !@file && !$options{renders};
                 return if @file && $file[0] == $linked[0] && $file[1] == $linked[1];
 
                 unlink $path or die "Could not remove the stale static $path: $!\n";

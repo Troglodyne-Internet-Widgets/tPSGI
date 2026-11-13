@@ -1574,10 +1574,11 @@ sub remove_watch {
 
 =head2 handle_changes
 
-Drain the inotify queue, running the callbacks registered for whatever changed,
-and restart tPSGI if any of the relevant libdir files changed (assuming
-autoreload is on).  Powers both the autorestart feature and app-registered
-watches.
+Drain the inotify queue, running the callbacks registered for whatever changed.
+If a module in a libdir changed and autoreload is on, remove the renders, as
+TPSGI::Startup::sweep_statics() does with C<renders>, so that no page that the
+old code rendered is served, and restart tPSGI.  Powers both the autorestart
+feature and app-registered watches.
 
 =cut
 
@@ -1615,6 +1616,11 @@ sub handle_changes {
     TPSGI::Startup::rewatch($_) foreach @rewatch;
 
     return 0 unless $had_changes && $self->{autoreload};
+
+    local $@;
+    my @removed = eval { TPSGI::Startup::sweep_statics( tpsgi_dir => $self->{tpsgi_dir}, basedir => $self->{basedir} // '.', renders => 1 ) };
+    $self->WARN("Could not remove the renders after a change in libdirs: $@") if $@;
+    $self->INFO("Remove static $_, since a module changed") foreach @removed;
 
     # We don't have to clean up the wds, that is handled in the destructor for Inotify
     $self->INFO("Relevant Change in libdirs detected, reloading\n");
