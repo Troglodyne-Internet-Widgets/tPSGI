@@ -14,8 +14,6 @@ variables:
 checks:
   CriticProfile:
     overrides:
-      ProhibitUnusedImports:
-        allow: re Test2::Plugin::NoWarnings
       # bin/tpsgi is the PSGI application, and starts the server that runs it when
       # it is run itself.  The programs run from the checkout until a release.
       logicLAB::RequireSheBang:
