@@ -93,7 +93,9 @@ TPSGI::handle_changes() removes them.
 
 my sub sweep_statics ( $self, %options ) {
     my @removed = TPSGI::Startup::sweep_statics( TPSGI::Startup::get_config(), %options );
-    $self->log( 2, "Removed the stale static $_" ) foreach @removed;
+    foreach my $static (@removed) {
+        $self->log( 2, "Removed the stale static $static" );
+    }
     return;
 }
 

@@ -34,8 +34,10 @@ subtest 'sweep_statics' => sub {
     my %options = ( tpsgi_dir => $root, basedir => 'app' );
 
     # What serve() leaves: each file of the app's www/ linked into the statics.
-    write_file( "$root/app/www/styles/$_.css", "$_ as it was" ) foreach qw{kept replaced};
-    link( "$root/app/www/styles/$_.css", "$root/www/static/styles/$_.css" ) or die $! foreach qw{kept replaced};
+    foreach my $name (qw{kept replaced}) {
+        write_file( "$root/app/www/styles/$name.css", "$name as it was" );
+        link( "$root/app/www/styles/$name.css", "$root/www/static/styles/$name.css" ) or die $!;
+    }
 
     # An update replaces a file, as git and mv do, rather than writing into it.
     unlink "$root/app/www/styles/replaced.css" or die $!;

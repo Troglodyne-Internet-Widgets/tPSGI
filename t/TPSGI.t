@@ -2,6 +2,7 @@
 use 5.040;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use Test2::V0;
 use Test2::Plugin::NoWarnings;
@@ -103,7 +104,7 @@ subtest 'cannot_start answers with a page' => sub {
     local $TPSGI::debug = 1;
     $res = TPSGI::cannot_start( $error, ( fake_env() )[0], %options );
     my $escaped = q{Can't locate &#60;Bogus/Dep.pm&#62; in @INC &#38; &#34;elsewhere&#34;};
-    like( $res->[2][0], qr/\Q$escaped\E/, 'with TPSGI_DEBUG, the error, escaped' );
+    isnt( index( $res->[2][0], $escaped ), -1, 'with TPSGI_DEBUG, the error, escaped' );
     unlike( $res->[2][0], qr/<Bogus/, 'none of it read as markup' );
 };
 
@@ -189,7 +190,7 @@ subtest 'serve_ranges, with a range past the end of the file' => sub {
     is( $headers->{'Content-Length'}, 10,             'and Content-Length counts' );
 
     ( $status, $headers, $body ) = range_answer('bytes=8-20');
-    is( [ $status, $body, $headers->{'Content-Range'}, $headers->{'Content-Length'} ], [ 206, '89', 'bytes 8-9/10', 2 ], 'a range that starts inside the file ends at its last byte' );
+    is( [ $status, $body, @{$headers}{qw{Content-Range Content-Length}} ], [ 206, '89', 'bytes 8-9/10', 2 ], 'a range that starts inside the file ends at its last byte' );
 
     ( $status, $headers, $body ) = range_answer('bytes=9-9');
     is( [ $status, $body ], [ 206, '9' ], 'the last byte alone is a 206' );

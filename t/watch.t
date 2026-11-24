@@ -77,7 +77,10 @@ subtest 'registering the same callback repeatedly is idempotent' => sub {
     my $cb = sub { push( @fired, $_[1] ) };    ## no critic (ProhibitSingleUseLexicalSubs)
 
     # new() runs per request, so routers re-register their watches constantly.
-    $tpsgi->add_watch( $file, $cb ) for 1 .. 5;
+    my $registrations = 5;
+    while ( $registrations-- > 0 ) {
+        $tpsgi->add_watch( $file, $cb );
+    }
 
     my $wd = $TPSGI::Startup::watched{$file};
     is( scalar( @{ $TPSGI::Startup::watches{$wd}{callbacks} } ), 1, "callback registered exactly once" );

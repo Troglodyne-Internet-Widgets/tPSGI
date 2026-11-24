@@ -34,7 +34,8 @@ our $watching = 0;
 our @DEFAULT_EVENTS = qw{CREATE MODIFY DELETE MOVE};
 
 # Bit => name for every event we can actually be handed back by read().
-my %EVENT_NAMES = map { Linux::Perl::inotify::->EVENT_NUMBER()->{$_} => $_ } qw{
+my $EVENT_NUMBER = Linux::Perl::inotify::->EVENT_NUMBER();
+my %EVENT_NAMES  = map { $EVENT_NUMBER->{$_} => $_ } qw{
   ACCESS MODIFY ATTRIB CLOSE_WRITE CLOSE_NOWRITE OPEN
   MOVED_FROM MOVED_TO CREATE DELETE DELETE_SELF MOVE_SELF
   UNMOUNT Q_OVERFLOW IGNORED ISDIR
