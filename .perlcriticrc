@@ -16,15 +16,14 @@
 #   InputOutput::ProhibitBarewordDirHandles       5.038
 #   Modules::RequireEndWithOne                  module_true from 5.038
 #
-# One more goes the same way at 5.042, and is named below because this file
-# assumes only 5.040.  Delete it once your floor is 5.041 or later, which
-# selects the 5.042 bundle:
+# Two more go the same way at 5.042.  They stay below because this file assumes
+# only 5.040, and at a later floor they report nothing, so they cost nothing:
 #
 #   Variables::ProhibitPerl4PackageNames        no apostrophe as a package
 #                                                 separator from 5.042
-#
-# CodeLayout::RequireASCII, which the template also names until 5.042, is off
-# here.  See below for why.
+#   CodeLayout::RequireASCII                    source::encoding "ascii" from
+#                                                 5.042, which is stricter than
+#                                                 the policy and not skippable
 severity  = 1
 only      = 1
 force     = 0
@@ -37,12 +36,14 @@ allow-unsafe = 1
 [Documentation::RequirePod]
 # Security
 [ValuesAndExpressions::PreventSQLInjection]
-# CodeLayout::RequireASCII is off, though the floor is 5.040.  It also applies
-# to POD, and the contributors that [Git::Contributors] lists include a name
-# that is not ASCII.  Spelling somebody's name wrong is not a code standard.
+# It also applies to POD, where the only thing it tends to catch is a
+# contributor's name in the section that Dist::Zilla generates.
+[CodeLayout::RequireASCII]
 [RegularExpressions::RequireDefault]
 strict = 1
 [RegularExpressions::PreventUselessMetacharacterEscapes]
+# A pattern written as a string loses the modifiers that RequireDefault asks for.
+[RegularExpressions::ProhibitRegexInStrings]
 # PEBCAK catches
 [BuiltinFunctions::ProhibitDeleteOnArrays]
 [Subroutines::ProhibitAmbiguousFunctionCalls]
@@ -50,8 +51,14 @@ strict = 1
 [ValuesAndExpressions::ProhibitDefinedBeforeLength]
 [Variables::ProhibitUselessVarClearing]
 [Subroutines::ProhibitTailRecursion]
+[ValuesAndExpressions::ProhibitDescendingRanges]
 [Bangs::ProhibitUselessRegexModifiers]
+[RegularExpressions::ProhibitIneffectiveModifiers]
+# The @example tag of a blurb that Pod::Coverage::More::Blurb reads is code in a
+# comment on purpose: the generated POD shows it as the example of the sub.
+# The pattern is the default of the policy, anchored, and refusing those lines.
 [Bangs::ProhibitCommentedOutCode]
+commentedcoderegex = \A(?!\#\s*\@example\b).*\$[A-Za-z_].*=
 [Tics::ProhibitUseBase]
 [Plicease::ProhibitLeadingZeros]
 [RegularExpressions::ProhibitEmptyAlternatives]
@@ -67,10 +74,9 @@ strict = 1
 warn_level = 40
 info_level = 30
 [Variables::ProhibitUselessInitialization]
+[ValuesAndExpressions::RequireSlices]
 [PreferredModules]
 config = .preferred_modules.ini
-# bin/tpsgi is the PSGI application, and starts the server that runs it when it
-# is run itself.
 [logicLAB::RequireSheBang]
 formats = #!/usr/bin/env perl || #!/usr/bin/env tarbaby
 # Performance
@@ -79,6 +85,7 @@ formats = #!/usr/bin/env perl || #!/usr/bin/env tarbaby
 [Performance::ProhibitRegexForSimpleSubstring]
 [RegularExpressions::ProhibitRegexToStripAffix]
 [RegularExpressions::ProhibitRegexToChomp]
+[RegularExpressions::ProhibitRegexToSplitAtDelimiter]
 [BuiltinFunctions::ProhibitChainingSameListSub]
 [RegularExpressions::ProhibitRegexForStringEquality]
 [Subroutines::ProhibitUnderscorePrivateSubs]
@@ -86,8 +93,13 @@ formats = #!/usr/bin/env perl || #!/usr/bin/env tarbaby
 [ValuesAndExpressions::ProhibitLiteralArithmetic]
 [BuiltinFunctions::ProhibitIndirectBooleanGrep]
 # What ProhibitMutatingListFunctions reports, which this replaces, and a block
-# that changes $_ through a sub that it calls.
+# that changes $_ through a sub that it calls.  Its two call reports stay off,
+# because the policy below reports the same calls.
 [ControlStructures::ProhibitMutatingListFunctionsStricter]
+# A call that it cannot read, a method or a sub from elsewhere, while $_ is the
+# caller's element: in a list function block before local ($_) = $_, and
+# before a postfix for.
+[Variables::ProhibitCallsWithAliasedTopic]
 # An if, elsif, else or unless whose block holds no statement, a comment
 # being none.  Loops are left alone, because a loop condition can do the work.
 [ControlStructures::ProhibitEmptyConditionalBlocks]
@@ -102,11 +114,10 @@ exclude_functions = print
 [RequireFatalWarnings]
 [ProhibitUnusedImports]
 # Modules imported for a side effect rather than for a symbol, which the policy
-# cannot see.  `re` is here because every file says `use re '/aasx'`.  Add your
-# own: IO::Prompter installs prompt() from a custom import rather than @EXPORT,
-# and anything loaded by name from a string is invisible the same way.
-# Test2::Plugin::NoWarnings fails a test that warns, and imports nothing.
-allow = re Test2::Plugin::NoWarnings
+# cannot see.  Its built-in list has the pragmas, re, Test::NoWarnings,
+# Test2::Plugin::NoWarnings and Mojo::Base.  Add your own with an override of
+# allow in .conformance.yml, such as a module that another one loads by the name
+# you give it in a string: Text::Xslate takes its bridge as module => [...].
 # Off in a distribution that is only a library: it counts calls from bin/ and
 # lib/, and every sub a library exists to offer is called from neither -- a
 # module with one public sub and no bin/ reports that sub, which is the policy
@@ -254,7 +265,6 @@ exclude_functions = print
 # is given variables to prohibit, and nobody has named any.
 [Variables::ProhibitLocalVars]
 [Variables::ProhibitMatchVars]
-# Drop this one at 5.041 and later, with RequireASCII above.
 [Variables::ProhibitPerl4PackageNames]
 [Variables::ProhibitReusedNames]
 # Stricter than the core ProhibitUnusedVariables, which reports only a bare
@@ -263,11 +273,17 @@ exclude_functions = print
 # A method takes the arguments of its interface, whether it reads them or not.
 allow_unused_subroutine_arguments = 1
 # Anything that returns a guard, which does its work by being held to the end of
-# its scope: a mock, a mocked file, a change of directory, a lock.
-# allow_if_computed_by = Test::MockModule->new Test::MockFile->file
+# its scope: a mock, a mocked file, or a change of directory that File::pushd
+# undoes when the object goes.
+allow_if_computed_by = Test::MockModule->new Test::MockFile->file Test::MockFile->file_from_disk Test::MockFile->symlink Test::MockFile->dir Test::MockFile->new_dir pushd tempd
 [Variables::ProtectPrivateVars]
 [Variables::RequireLexicalLoopIterators]
+# A block foreach with no loop variable, whose $_ the body can clobber.
+[Variables::ProhibitTopicIterator]
 [Variables::RequireLocalizedPunctuationVars]
 [Variables::RequireNegativeIndices]
+# A read through a missing level, such as $h{a}{b}, creates $h{a}.  Write
+# no autovivification; in the scope, which [AutoPrereqs] then declares.
+[Variables::RequireNoAutovivification]
 # Extensions to perl -c
 [CompileTime]
