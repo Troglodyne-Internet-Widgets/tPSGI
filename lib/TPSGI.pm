@@ -5,6 +5,7 @@ package TPSGI;
 use 5.040;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use Carp::Always;
 
@@ -315,7 +316,9 @@ sub new {
     my $router_key = join( "\0", $options{tpsgi_dir}, @{ $self->{routers} } );
     $self->{router} = $routers{$router_key} //= do {
         my $router = TPSGI::Router->new(@documents);
-        $self->DEBUG("Registered route \U$_->{method}\E $_->{template}") foreach $router->routes();
+        foreach my $route ( $router->routes() ) {
+            $self->DEBUG("Registered route \U$route->{method}\E $route->{template}");
+        }
         $router;
     };
 
@@ -1061,7 +1064,7 @@ sub extract_query {
     my ( $form, $uploads );
     if ( $env->{REQUEST_METHOD} eq 'POST' ) {
 
-        my $body = HTTP::Body->new( $env->{CONTENT_TYPE}, $env->{CONTENT_LENGTH} );
+        my $body = HTTP::Body->new( @{$env}{qw{CONTENT_TYPE CONTENT_LENGTH}} );
         while ( $env->{'psgi.input'}->read( my $buf, $CHUNK_SIZE ) ) {
             $body->add($buf);
         }
@@ -1079,7 +1082,9 @@ sub extract_query {
         env          => $env,
     );
     if ($status) {
-        $self->DEBUG("Rejected $path: $_") foreach @errors;
+        foreach my $error (@errors) {
+            $self->DEBUG("Rejected $path: $error");
+        }
 
         # What respond() knows of the request, which the log line and the
         # error page need.  The query has neither the method nor the path.
@@ -1613,14 +1618,18 @@ sub handle_changes {
         push( @rewatch, $change->{wd} ) if List::Util::any { $_ eq 'IGNORED' } @{ $change->{events} };
     }
 
-    TPSGI::Startup::rewatch($_) foreach @rewatch;
+    foreach my $wd (@rewatch) {
+        TPSGI::Startup::rewatch($wd);
+    }
 
     return 0 unless $had_changes && $self->{autoreload};
 
     local $@;
     my @removed = eval { TPSGI::Startup::sweep_statics( tpsgi_dir => $self->{tpsgi_dir}, basedir => $self->{basedir} // '.', renders => 1 ) };
     $self->WARN("Could not remove the renders after a change in libdirs: $@") if $@;
-    $self->INFO("Remove static $_, since a module changed") foreach @removed;
+    foreach my $static (@removed) {
+        $self->INFO("Remove static $static, since a module changed");
+    }
 
     # We don't have to clean up the wds, that is handled in the destructor for Inotify
     $self->INFO("Relevant Change in libdirs detected, reloading\n");

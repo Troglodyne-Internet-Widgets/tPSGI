@@ -2,6 +2,7 @@
 use 5.040;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use Test2::V0;
 use Test2::Plugin::NoWarnings;

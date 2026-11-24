@@ -5,6 +5,7 @@ package TPSGI::Router;
 use 5.040;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use List::Util ();
 use JSON::Validator::Schema::OpenAPIv3;
@@ -425,7 +426,7 @@ sub validate {
     my $as_is = sub { return $_[0] };
 
     my @errors = $route->{schema}->validate_request(
-        [ $route->{method}, $route->{template} ],
+        [ @{$route}{qw{method template}} ],
         {
             path   => $getter->( $route->{path}, sub { my $name = shift; $name =~ s/ [+] \z //; return $name } ),
             query  => $getter->( $query,         $as_is ),

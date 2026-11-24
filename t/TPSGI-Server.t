@@ -90,17 +90,20 @@ subtest 'every connection is answered while the parent is HUPed' => sub {
         Plack::Handler::TPSGI->new( listen => [$sock], workers => 5, pid => "$dir/pid", keepalive => 0 )->run( sub { [ 200, [ 'Content-Type' => 'text/plain' ], ['ok'] ] } );
         exit 0;
     }
-    for ( 1 .. 100 ) { last if -S $sock && -s "$dir/pid"; Time::HiRes::sleep(0.1) }
+    my $attempts = 100;
+    while ( $attempts-- > 0 ) { last if -S $sock && -s "$dir/pid"; Time::HiRes::sleep(0.1) }
     ok( -S $sock, 'the server is listening' ) or return;
     my $parent = Mojo::File->new("$dir/pid")->slurp;
     chomp $parent;
 
     # Four clients, each counting the requests that got no answer.
-    my @clients = map {
-        my $pid = fork() // die "fork: $!";
+    my @clients;
+    foreach my $client ( 1 .. 4 ) {
+        my $pid = fork() // die "fork of client $client: $!";
         if ( !$pid ) {
-            my $bad = 0;
-            for ( 1 .. 1500 ) {
+            my $bad      = 0;
+            my $requests = 1500;
+            while ( $requests-- > 0 ) {
                 my $c = IO::Socket::UNIX->new( Peer => $sock ) or do { $bad++; next };
                 print {$c} "GET / HTTP/1.0\r\n\r\n";
                 my $got = do { local $/; <$c> }
@@ -109,10 +112,11 @@ subtest 'every connection is answered while the parent is HUPed' => sub {
             }
             exit( $bad > 255 ? 255 : $bad );
         }
-        $pid
-    } 1 .. 4;
+        push @clients, $pid;
+    }
 
-    for ( 1 .. 60 ) { kill( 'HUP', $parent ); Time::HiRes::sleep(0.05) }
+    my $hups = 60;
+    while ( $hups-- > 0 ) { kill( 'HUP', $parent ); Time::HiRes::sleep(0.05) }
 
     my $unanswered = 0;
     foreach my $pid (@clients) { waitpid( $pid, 0 ); $unanswered += $? >> 8 }
