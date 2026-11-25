@@ -67,4 +67,20 @@ subtest 'sweep_statics' => sub {
     is( [ TPSGI::Startup::sweep_statics( tpsgi_dir => "$root/bogus", basedir => '.' ) ], [], 'and an install with no statics is nothing to sweep' );
 };
 
+subtest 'get_config: compress_types' => sub {
+    my $home = File::Temp::tempdir( CLEANUP => 1 );
+    local $ENV{HOME} = $home;
+
+    my %options = TPSGI::Startup::get_config();
+    is( $options{compress_types}, [], 'with no ~/.tpsgi.ini, nothing is compressed' );
+
+    write_file( "$home/.tpsgi.ini", "[default]\ncompress_types=text/html,text/css\n" );
+    %options = TPSGI::Startup::get_config();
+    is( $options{compress_types}, [qw{text/html text/css}], 'and ~/.tpsgi.ini names the types to compress, separated by commas' );
+
+    write_file( "$home/.tpsgi.ini", "[default]\ncompress_types=text/html\n" );
+    %options = TPSGI::Startup::get_config();
+    is( $options{compress_types}, ['text/html'], 'or one type' );
+};
+
 done_testing();

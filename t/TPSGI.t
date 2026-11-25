@@ -7,10 +7,11 @@ no autovivification;
 use Test2::V0;
 use Test2::Plugin::NoWarnings;
 
-use Cwd        ();
-use File::Path ();
-use File::Temp qw{tempdir};
-use Mojo::File ();
+use Cwd                    ();
+use File::Path             ();
+use File::Temp             qw{tempdir};
+use IO::Uncompress::Gunzip ();
+use Mojo::File             ();
 use Test::MockModule;
 
 use FindBin::libs;
@@ -439,6 +440,40 @@ subtest 'serve, when it links a file into the statics' => sub {
     is( $res->[0], 200, 'serves the file' );
     ok( -e "$tpsgi_dir/www/static/deep/page.txt", 'and links it into the statics' );
     is( mode_of("$tpsgi_dir/www/static/deep"), sprintf( '%04o', 0o777 & ~$umask ), 'a directory that it makes takes its mode from the umask' );
+};
+
+subtest 'serve, and compress_types' => sub {
+    my $tpsgi_dir = tempdir( CLEANUP => 1 );
+    my $oldcwd    = Cwd::getcwd();
+    chdir $tpsgi_dir or die "Could not chdir to $tpsgi_dir: $!";
+    File::Path::make_path('www');
+    Mojo::File->new('www/page.txt')->spew( 'page ' x 100 );
+
+    # The status, the headers as a hash, and the body as a string.
+    my sub served ( $types, $deflate ) {
+        my $tpsgi = bless( { %options, ip => '0.0.0.0', tpsgi_dir => $tpsgi_dir, compress_types => $types }, 'TPSGI' );
+        my $res   = $tpsgi->serve( '/page.txt', 'www/page.txt', [ Time::HiRes::gettimeofday() ], 0, [], 0, $deflate );
+        my $body  = ref $res->[2] eq 'ARRAY' ? join( q{}, @{ $res->[2] } ) : do { local $/ = undef; readline $res->[2] };
+        return ( $res->[0], { @{ $res->[1] } }, $body );
+    }
+
+    my ( $code, $headers, $body ) = served( [], 1 );
+    is( $code,                          200,           'by default, a client that takes gzip gets the file' );
+    is( $headers->{'Content-Encoding'}, undef,         'uncompressed, so the proxy in front can compress it' );
+    is( $body,                          'page ' x 100, 'as it is on disk' );
+    ok( -e "$tpsgi_dir/www/static/page.txt", 'and the file is linked into the statics all the same' );
+
+    ( $code, $headers, $body ) = served( ['text/plain'], 1 );
+    is( $headers->{'Content-Encoding'}, 'gzip', 'a type that compress_types names is compressed' );
+    IO::Uncompress::Gunzip::gunzip( \$body => \my $plain ) or die "gunzip failed\n";
+    is( $plain,                       'page ' x 100, 'and unzips to the file' );
+    is( $headers->{'Content-Length'}, length($body), 'with the length of what is sent' );
+
+    is( ( served( ['TEXT/Plain'], 1 ) )[1]{'Content-Encoding'}, 'gzip', 'a type is named in any case' );
+    is( ( served( ['text/css'],   1 ) )[1]{'Content-Encoding'}, undef,  'a type that it does not name is not compressed' );
+    is( ( served( ['text/plain'], 0 ) )[1]{'Content-Encoding'}, undef,  'and a client that does not take gzip never gets it' );
+
+    chdir $oldcwd or die "Could not chdir back to $oldcwd: $!";
 };
 
 subtest 'respond, with a path that climbs out of www/' => sub {

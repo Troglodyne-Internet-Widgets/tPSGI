@@ -392,9 +392,12 @@ sub routes {
 
 Serve a file, with options to stream and cache the output.  A request with
 ranges, on a server that streams, gets serve_ranges().  A file larger than
-C<$CHUNK_SIZE>, on a server that streams, is streamed.  Otherwise a client that
-takes gzip gets the file compressed, and the file is linked into
-F<www/static> under C<tpsgi_dir>.  A file that cannot be opened gets a 403.
+C<$CHUNK_SIZE>, on a server that streams, is streamed.  Otherwise the file is
+linked into F<www/static> under C<tpsgi_dir>, and sent whole.  It is sent
+compressed with gzip only when the client takes gzip and C<compress_types> in
+F<~/.tpsgi.ini> names its type.  The list is empty by default, so that a proxy
+in front, which can keep one copy and compress it for each client, does the
+compressing.  A file that cannot be opened gets a 403.
 
 =over 4
 
@@ -470,24 +473,6 @@ sub serve {    ## no critic (ProhibitManyArgs) -- routers call it with these, in
           }
           if $streaming && $sz > $CHUNK_SIZE;
 
-        #Return data in the event the caller does not support deflate
-        if ( !$deflate ) {
-            push( @headers, "Content-Length" => $sz );
-
-            # Append server-timing headers
-            my $tot = tv_interval($start) * 1000;
-            push( @headers, 'Server-Timing' => "file;dur=$tot" );
-
-            return [ $code, \@headers, $fh ];
-        }
-
-        #Compress everything less than 1MB
-        push( @headers, "Content-Encoding" => "gzip" );
-        my $dfh;
-        IO::Compress::Gzip::gzip( $fh => \$dfh );
-        print $IO::Compress::Gzip::GzipError if $IO::Compress::Gzip::GzipError;
-        push( @headers, "Content-Length" => length($dfh) );
-
         # Copy to the statics if it's not already there
         my $static_path = $path;
         $static_path =~ s{^/*www/}{};
@@ -509,9 +494,20 @@ sub serve {    ## no critic (ProhibitManyArgs) -- routers call it with these, in
 
         $self->INFO("GET 200 $fullpath");
 
-        # Append server-timing headers
-        my $tot = tv_interval($start) * 1000;
-        push( @headers, 'Server-Timing' => "file;dur=$tot" );
+        my ($type) = $ft =~ m/\A\s*([^;\s]+)/;
+        my $compress = $deflate && List::Util::any { lc($_) eq lc($type) } @{ $self->{compress_types} // [] };
+        if ( !$compress ) {
+            push( @headers, "Content-Length" => $sz );
+            push( @headers, 'Server-Timing'  => "file;dur=" . ( tv_interval($start) * 1000 ) );
+            return [ $code, \@headers, $fh ];
+        }
+
+        push( @headers, "Content-Encoding" => "gzip" );
+        my $dfh;
+        IO::Compress::Gzip::gzip( $fh => \$dfh );
+        print $IO::Compress::Gzip::GzipError if $IO::Compress::Gzip::GzipError;
+        push( @headers, "Content-Length" => length($dfh) );
+        push( @headers, 'Server-Timing'  => "file;dur=" . ( tv_interval($start) * 1000 ) );
 
         return [ $code, \@headers, [$dfh] ];
     }
@@ -2159,6 +2155,7 @@ Obeys ~/.tpsgi.ini -- this is what will control all the custom aspects mentioned
     user        : Who to run as
     http_user   : Who's proxying this application (used for statics)
     autoreload  : Whether or not to automatically reload the application when library files change. Default 0.
+    compress_types : MIME types of the files that serve() gzips for a client that takes gzip, such as text/html,text/css.  Separate with comma.  None by default, so that a proxy in front compresses.
 
 You can run bin/tpsgi-config to get any config value needed by scripts.
 
