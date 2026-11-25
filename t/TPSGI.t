@@ -242,6 +242,34 @@ subtest 'new' => sub {
                         responses => { 200 => { description => 'ok' } },
                     },
                 },
+                '/cgi' => {
+                    get => {
+                        'x-tpsgi-callback' => sub { return [ 200, [], [ $ENV{QUERY_STRING} ] ] },
+                        'x-tpsgi-env'      => true,
+                        responses          => { 200 => { description => 'ok' } },
+                    },
+                },
+                '/echo/{slug}' => {
+                    get => {
+                        'x-tpsgi-callback' => sub {
+                            my ( $tpsgi, $query ) = @_;
+                            my $input = join( ',', map { "$_=$query->{input}{$_}" } sort keys( %{ $query->{input} } ) );
+                            return [ 200, [], [ $input, join( ',', grep { exists $query->{$_} } qw{slug limit from} ) ] ];
+                        },
+                        'x-tpsgi-data' => { from => 'data' },
+                        parameters     => [
+                            { name => 'slug',  in => 'path',  required => true, schema => { type => 'string' } },
+                            { name => 'limit', in => 'query', schema   => { type => 'integer' } },
+                        ],
+                        responses => { 200 => { description => 'ok' } },
+                    },
+                },
+                '/plain' => {
+                    post => {
+                        'x-tpsgi-callback' => sub { return [ 200, [], ['ok'] ] },
+                        responses          => { 200 => { description => 'ok' } },
+                    },
+                },
             },
         );
         ROUTER
@@ -258,29 +286,29 @@ subtest 'new' => sub {
     );
 };
 
-subtest 'extract_query' => sub {
+subtest 'extract_input' => sub {
     my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
     my $env   = { REQUEST_METHOD => 'GET' };
     my $cafe  = "caf\N{LATIN SMALL LETTER E WITH ACUTE}";
 
-    my $query = $tpsgi->extract_query( "/post/$cafe", $tpsgi->routes->match( 'GET', "/post/$cafe" ), $env );
+    my $query = $tpsgi->extract_input( "/post/$cafe", $tpsgi->routes->match( 'GET', "/post/$cafe" ), $env );
     is( $query->{slug}, $cafe,  'a path parameter, outside ASCII too, is in the query' );
     is( $query->{from}, 'data', 'and so is x-tpsgi-data' );
 
-    $query = $tpsgi->extract_query( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'limit=5' } );
+    $query = $tpsgi->extract_input( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'limit=5' } );
     is( $query->{limit}, 5,   'the query string is in the query' );
     is( $query->{slug},  'x', 'beside the path parameter' );
 
     local @Test::Logger::Capture::lines;
-    my $res = $tpsgi->extract_query( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'limit=many' } );
+    my $res = $tpsgi->extract_input( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'limit=many' } );
     is( ref $res,  'ARRAY', 'a query that fails validation is an answer, not a query' );
     is( $res->[0], 400,     'a 400' );
     unlike( $res->[2][0], qr/integer/, 'which does not say why' );
 
-    $res = $tpsgi->extract_query( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'junk=1' } );
+    $res = $tpsgi->extract_input( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'junk=1' } );
     is( $res->[0], 400, 'and so is one with a key that the operation does not declare' );
 
-    $res = $tpsgi->extract_query( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'slug=y' } );
+    $res = $tpsgi->extract_input( '/post/x', $tpsgi->routes->match( 'GET', '/post/x' ), { %$env, QUERY_STRING => 'slug=y' } );
     is( $res->[0], 400, 'even when the path declares it' );
 };
 
@@ -302,6 +330,37 @@ subtest 'route' => sub {
     ok( $query->{has_query}, 'beside has_query' );
 
     is( $query_of->(undef)->{query_string}, q{}, 'a request without one gets an empty string, not undef' );
+};
+
+subtest 'extract_input, with a body' => sub {
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
+    my $part  = qq{--x\r\nContent-Disposition: form-data; name="file"; filename="f.txt"\r\nContent-Type: text/plain\r\n\r\nhi\r\n--x--\r\n};
+    my %env   = (
+        REQUEST_METHOD => 'POST',
+        CONTENT_TYPE   => 'multipart/form-data; boundary=x',
+        CONTENT_LENGTH => length($part),
+    );
+
+    local @Test::Logger::Capture::lines;
+    open( my $input, '<', \$part ) or die "Cannot open a scalar: $!";
+    my $res = $tpsgi->extract_input( '/plain', $tpsgi->routes->match( 'POST', '/plain' ), { %env, 'psgi.input' => $input } );
+    close($input) or die "Cannot close: $!";
+    is( ref $res eq 'ARRAY' && $res->[0], 400, 'a file, to an operation with no requestBody, is a 400' );
+};
+
+subtest 'route' => sub {
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
+    my $res   = $tpsgi->respond( { REQUEST_METHOD => 'GET', PATH_INFO => '/echo/x', REQUEST_URI => '/echo/x?limit=5', QUERY_STRING => 'limit=5', HTTP_HOST => 'test.test' } );
+    is( $res->[0],    200,                        'answers' );
+    is( $res->[2][0], 'from=data,limit=5,slug=x', 'with the query, the path and x-tpsgi-data in the input of the query' );
+    is( $res->[2][1], '',                         'and none of them beside it' );
+};
+
+subtest 'route, in CGI mode' => sub {
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
+    my $res   = $tpsgi->respond( { REQUEST_METHOD => 'GET', PATH_INFO => '/cgi', REQUEST_URI => '/cgi?anything=1', QUERY_STRING => 'anything=1', HTTP_HOST => 'test.test' } );
+    is( $res->[0],    200,          'is not validated, so a key that nothing declares is no 400' );
+    is( $res->[2][0], 'anything=1', 'and the CGI finds it in %ENV' );
 };
 
 subtest 'respond, with a method that the path does not have' => sub {
@@ -380,6 +439,24 @@ subtest 'serve, when it links a file into the statics' => sub {
     is( $res->[0], 200, 'serves the file' );
     ok( -e "$tpsgi_dir/www/static/deep/page.txt", 'and links it into the statics' );
     is( mode_of("$tpsgi_dir/www/static/deep"), sprintf( '%04o', 0o777 & ~$umask ), 'a directory that it makes takes its mode from the umask' );
+};
+
+subtest 'respond, with a path that climbs out of www/' => sub {
+    my $tpsgi = TPSGI->new( %new_options, routers => ['GoodRouter.pm'] );
+    my $ask   = sub ($path) { return $tpsgi->respond( { REQUEST_METHOD => 'GET', PATH_INFO => $path, REQUEST_URI => $path, HTTP_HOST => 'test.test' } ) };
+
+    # respond() looks for a file under www/ of its cwd.
+    my $oldcwd = Cwd::getcwd();
+    File::Path::make_path("$dir/www");
+    open( my $fh, '>', "$dir/secret.txt" ) or die "Could not write $dir/secret.txt: $!";
+    close($fh)                             or die "Could not close $dir/secret.txt: $!";
+    chdir $dir                             or die "Could not chdir to $dir: $!";
+
+    is( $ask->('/../secret.txt')->[0],      400, 'is a 400, rather than the file above www/' );
+    is( $ask->('/a/../../secret.txt')->[0], 400, 'and so is one that climbs out further down' );
+    is( $ask->('/no..such..file.txt')->[0], 404, 'but two dots inside a name are only a name' );
+
+    chdir $oldcwd or die "Could not chdir back to $oldcwd: $!";
 };
 
 done_testing();

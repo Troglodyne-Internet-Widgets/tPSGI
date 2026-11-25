@@ -961,8 +961,8 @@ sub respond {
         tpsgi    => $self,
     };
 
-    # Paths with .. in them are not refused here, because starman appears to
-    # refuse them already.
+    # starman passes a .. through, and the file of such a path is outside www/.
+    return $self->badrequest($cur_query) if List::Util::any { $_ eq '..' } split m{/}, $path;
 
     # Support aliased paths
     my $aliases = $self->{aliases};
@@ -1163,10 +1163,10 @@ sub is_cgi ( $self, $path ) {
 
 =head2 route($route, $env, %request) = PSGI response
 
-Run the callback of $route, which TPSGI::Router::match() returned, with the
-query that extract_query() builds.  In CGI mode, which C<x-tpsgi-env> asks
-for, the query is not built, and the callback gets the request as %ENV
-instead.  respond() calls route(), with %request holding C<fullpath>, C<path>,
+Run the callback of $route, which TPSGI::Router::match() returned, with a
+query of what tPSGI knows of the request.  The query's C<input> is what
+extract_input() builds.  In CGI mode, which C<x-tpsgi-env> asks for, the input
+is empty, and the callback gets the request as %ENV instead.  respond() calls route(), with %request holding C<fullpath>, C<path>,
 C<start>, C<last_fetch>, C<deflate>, C<domain> and C<port>.
 
 C<query_string> in the query is the query string as the client sent it, still
@@ -1204,15 +1204,12 @@ sub route {
     my $cgi_mode  = $operation->{'x-tpsgi-env'};
     my $streaming = $env->{'psgi.streaming'};
 
-    # Build the query data for passing to a route.
-    # GET, POST, path parameters, then explicit data overrides.
-    my $query = {};
-
     # If we're running in CGI mode, leave everything as-is.
-    $query = $self->extract_query( $path, $route, $env ) unless $cgi_mode;
+    my $input = $cgi_mode ? {} : $self->extract_input( $path, $route, $env );
 
-    # We failed validation if $query isn't a hashref.
-    return $query if ref $query eq 'ARRAY';
+    # We failed validation if $input isn't a hashref.
+    return $input if ref $input eq 'ARRAY';
+    my $query = { input => $input };
 
     # allow this stuff to survive down to the end of some routes
     $query->{last_fetched} = $request{last_fetch};
@@ -1276,12 +1273,14 @@ sub route {
     return $output;
 }
 
-=head2 extract_query($path, $route, $env) = HASHREF
+=head2 extract_input($path, $route, $env) = HASHREF
 
-The query a route's callback is given: the query string, then the POST body,
-then the path parameters of $route and the operation's C<x-tpsgi-data>, each
-over the last.  First TPSGI::Router::validate() checks the request against the
-operation.  A request that fails gets unsupported() for a 415 and badrequest()
+The input of a request, which route() gives the callback as the C<input> of its
+query: the query string, the fields and files of the POST body, the path
+parameters of $route and the operation's C<x-tpsgi-data>.  No two of them share
+a name, except that C<x-tpsgi-data> is merged over a body whose schema says
+C<additionalProperties>.  First TPSGI::Router::validate() checks the request
+against the operation.  A request that fails gets unsupported() for a 415 and badrequest()
 for a 400, and the reasons go to the log at the debug level.
 
 =over 4
@@ -1301,7 +1300,7 @@ fails validation.
 
 =cut
 
-sub extract_query {
+sub extract_input {
     my ( $self, $path, $route, $env ) = @_;
 
     my $query = {};
@@ -1325,6 +1324,7 @@ sub extract_query {
         $route,
         query        => $query,
         body         => $form,
+        uploads      => [ keys( %{ $uploads // {} } ) ],
         content_type => $env->{CONTENT_TYPE},
         env          => $env,
     );
@@ -2225,7 +2225,7 @@ C<%openapi> dies the same way.
 Each key of C<paths> is a template.  C<{name}> matches any text up to the next
 slash, and one segment can hold several variables and literal text, as in
 C<{map}.xml>.  C<{name+}> matches the rest of the path, slashes and all, and it
-must be the whole last segment.  Its parameter is named C<name+>, and the query
+must be the whole last segment.  Its parameter is named C<name+>, and the input
 gives its value as C<name>.  Any other character matches only itself.  No
 variable matches a newline.
 
@@ -2245,9 +2245,9 @@ The C<x-tpsgi-> keys of an operation are tPSGI's:
 
     x-tpsgi-callback  The sub that answers the request: a CODE reference, or
                       the fully qualified name of a sub.  Required.
-    x-tpsgi-data      A HASH, which is merged over the query.
+    x-tpsgi-data      A HASH, which is merged over the input.
     x-tpsgi-env       True for CGI mode: the callback gets the request as a
-                      CGI %ENV, and no query is built.
+                      CGI %ENV, and its input is empty.
 
 Any other C<x-> key is the application's.  The callback finds the whole
 operation in C<< $query->{dispatcher} >>, and the template that matched in
@@ -2258,11 +2258,18 @@ C<< $query->{route_template} >>.
 Before the callback runs, tPSGI checks the request against the operation's
 C<parameters> and C<requestBody>.  Values are coerced to their schema, so an
 integer arrives as a number.  A request that fails gets a 400, and the reasons
-go to the log at the debug level, not into the page.  The 400 is also the
-answer to a query key that the operation does not declare, when the operation
-declares a query parameter or a request body.  A form body is as strict as the
-C<additionalProperties> of its schema.  A body whose media type is not among
-the C<content> of the C<requestBody> gets a 415.
+go to the log at the debug level, not into the page.  A body whose media type
+is not among the C<content> of the C<requestBody> gets a 415.
+
+Every name in the request must be declared.  So the 400 is also the answer to
+a query key that is not a query parameter, to a body sent to an operation that
+has no C<requestBody>, and to a field or a file that is not a property of the
+body's schema.  A schema that says C<additionalProperties> decides for itself
+which other properties it takes.
+
+CGI mode is the exception, for a CGI that reads whatever it is sent.  An
+operation with C<x-tpsgi-env> is not validated, and its callback finds the
+request in %ENV.
 
 =head2 Callbacks
 
@@ -2274,9 +2281,8 @@ A callback is passed the TPSGI object and the query, which means you can do:
         $self->ERROR("eeee");
         $self->DEBUG("blah");
 
-        # From the query string, the POST body, the path or x-tpsgi-data, in
-        # that order: a later one wins.
-        my $param = $query->{param};
+        # From the query string, the POST body, the path or x-tpsgi-data.
+        my $param = $query->{input}{param};
 
         my %headers = ...;
 

@@ -184,18 +184,20 @@ and it has no extension or one of `cgi`, `sh`, `exe`, `pl`, `php` and `py`.
 
 ## route($route, $env, %request) = PSGI response
 
-Run the callback of $route, which TPSGI::Router::match() returned, with the
-query that extract\_query() builds.  In CGI mode, which `x-tpsgi-env` asks
-for, the query is not built, and the callback gets the request as %ENV
-instead.  respond() calls route(), with %request holding `fullpath`, `path`,
+Run the callback of $route, which TPSGI::Router::match() returned, with a
+query of what tPSGI knows of the request.  The query's `input` is what
+extract\_input() builds.  In CGI mode, which `x-tpsgi-env` asks for, the input
+is empty, and the callback gets the request as %ENV instead.  respond() calls route(), with %request holding `fullpath`, `path`,
 `start`, `last_fetch`, `deflate`, `domain` and `port`.
 
-## extract\_query($path, $route, $env) = HASHREF
+## extract\_input($path, $route, $env) = HASHREF
 
-The query a route's callback is given: the query string, then the POST body,
-then the path parameters of $route and the operation's `x-tpsgi-data`, each
-over the last.  First TPSGI::Router::validate() checks the request against the
-operation.  A request that fails gets unsupported() for a 415 and badrequest()
+The input of a request, which route() gives the callback as the `input` of its
+query: the query string, the fields and files of the POST body, the path
+parameters of $route and the operation's `x-tpsgi-data`.  No two of them share
+a name, except that `x-tpsgi-data` is merged over a body whose schema says
+`additionalProperties`.  First TPSGI::Router::validate() checks the request
+against the operation.  A request that fails gets unsupported() for a 415 and badrequest()
 for a 400, and the reasons go to the log at the debug level.
 
 ## cgi($env, $fullpath, $file\_actual, $last\_fetch) = PSGI response
@@ -426,7 +428,7 @@ and not at the first request.  A router that still defines `@routes` and no
 Each key of `paths` is a template.  `{name}` matches any text up to the next
 slash, and one segment can hold several variables and literal text, as in
 `{map}.xml`.  `{name+}` matches the rest of the path, slashes and all, and it
-must be the whole last segment.  Its parameter is named `name+`, and the query
+must be the whole last segment.  Its parameter is named `name+`, and the input
 gives its value as `name`.  Any other character matches only itself.  No
 variable matches a newline.
 
@@ -447,9 +449,9 @@ The `x-tpsgi-` keys of an operation are tPSGI's:
 ```perl
 x-tpsgi-callback  The sub that answers the request: a CODE reference, or
                   the fully qualified name of a sub.  Required.
-x-tpsgi-data      A HASH, which is merged over the query.
+x-tpsgi-data      A HASH, which is merged over the input.
 x-tpsgi-env       True for CGI mode: the callback gets the request as a
-                  CGI %ENV, and no query is built.
+                  CGI %ENV, and its input is empty.
 ```
 
 Any other `x-` key is the application's.  The callback finds the whole
@@ -461,11 +463,18 @@ operation in `$query->{dispatcher}`, and the template that matched in
 Before the callback runs, tPSGI checks the request against the operation's
 `parameters` and `requestBody`.  Values are coerced to their schema, so an
 integer arrives as a number.  A request that fails gets a 400, and the reasons
-go to the log at the debug level, not into the page.  The 400 is also the
-answer to a query key that the operation does not declare, when the operation
-declares a query parameter or a request body.  A form body is as strict as the
-`additionalProperties` of its schema.  A body whose media type is not among
-the `content` of the `requestBody` gets a 415.
+go to the log at the debug level, not into the page.  A body whose media type
+is not among the `content` of the `requestBody` gets a 415.
+
+Every name in the request must be declared.  So the 400 is also the answer to
+a query key that is not a query parameter, to a body sent to an operation that
+has no `requestBody`, and to a field or a file that is not a property of the
+body's schema.  A schema that says `additionalProperties` decides for itself
+which other properties it takes.
+
+CGI mode is the exception, for a CGI that reads whatever it is sent.  An
+operation with `x-tpsgi-env` is not validated, and its callback finds the
+request in %ENV.
 
 ## Callbacks
 
@@ -478,9 +487,8 @@ sub route {
     $self->ERROR("eeee");
     $self->DEBUG("blah");
 
-    # From the query string, the POST body, the path or x-tpsgi-data, in
-    # that order: a later one wins.
-    my $param = $query->{param};
+    # From the query string, the POST body, the path or x-tpsgi-data.
+    my $param = $query->{input}{param};
 
     my %headers = ...;
 

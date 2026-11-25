@@ -31,7 +31,12 @@ sub operation {
 
 sub document {
     my (%paths) = @_;
-    return { openapi => '3.0.3', info => { title => 'test', version => '1' }, paths => \%paths };
+    return {
+        openapi    => '3.0.3',
+        info       => { title   => 'test', version => '1' },
+        components => { schemas => { Count => { type => 'object', properties => { count => { type => 'integer' } } } } },
+        paths      => \%paths,
+    };
 }
 
 my $router = TPSGI::Router->new(
@@ -54,6 +59,38 @@ my $router = TPSGI::Router->new(
                                 additionalProperties => false,
                                 properties           => { count => { type => 'integer' } },
                             },
+                        },
+                    },
+                },
+            ),
+        },
+        '/upload' => {
+            post => operation(
+                requestBody => {
+                    content => {
+                        'multipart/form-data' => {
+                            schema => {
+                                type       => 'object',
+                                properties => { count => { type => 'integer' }, file => { type => 'string', format => 'binary' } },
+                            },
+                        },
+                        'application/x-www-form-urlencoded' => { schema => { '$ref' => '#/components/schemas/Count' } },
+                    },
+                },
+            ),
+        },
+        '/open/{slug}' => {
+            post => operation(
+                parameters  => [ path_parameter('slug') ],
+                requestBody => { content => { 'application/x-www-form-urlencoded' => { schema => { type => 'object', additionalProperties => true } } } },
+            ),
+        },
+        '/open' => {
+            post => operation(
+                requestBody => {
+                    content => {
+                        'application/x-www-form-urlencoded' => {
+                            schema => { type => 'object', additionalProperties => true, properties => { count => { type => 'integer' } } },
                         },
                     },
                 },
@@ -181,8 +218,12 @@ subtest 'validation' => sub {
     ( $status, @errors ) = $router->validate( $route, query => { limit => 1, junk => 1 } );
     is( $status, 400, 'an undeclared query key is a 400' );
     like( \@errors, [qr/\/junk:/], 'and named' );
-    is( [ $router->validate( $route,                            query => { limit    => 1, route => '/x' } ) ], [], 'except a key that tPSGI sets itself' );
-    is( [ $router->validate( $router->match( 'GET', '/loose' ), query => { anything => 1 } ) ],                [], 'and an operation that declares nothing takes anything' );
+    ( $status, @errors ) = $router->validate( $route, query => { limit => 1, route => '/x' } );
+    is( $status, 400, 'even one that tPSGI sets in the query itself, since the input is apart from it' );
+    ( $status, @errors ) = $router->validate( $router->match( 'GET', '/loose' ), query => { anything => 1 } );
+    is( $status, 400, 'and so is any key of the query, for an operation that declares nothing' );
+    like( \@errors, [qr/\/anything:/], 'named too' );
+    is( [ $router->validate( $router->match( 'GET', '/loose' ), query => {} ) ], [], 'which takes an empty query' );
 
     $route = $router->match( 'POST', '/form' );
     my $form_type = 'application/x-www-form-urlencoded';
@@ -193,6 +234,62 @@ subtest 'validation' => sub {
     ( $status, @errors ) = $router->validate( $route, body => { count => 3 }, content_type => 'text/plain' );
     is( $status,                                                                                              415, 'a body of a media type the operation does not take is a 415' );
     is( [ $router->validate( $route, body => { count => 3 }, content_type => "$form_type; charset=UTF-8" ) ], [],  'and parameters of the media type do not count' );
+};
+
+subtest 'the names of a body' => sub {
+    my $form_type = 'application/x-www-form-urlencoded';
+    my $multipart = 'multipart/form-data; boundary=x';
+
+    my ( $status, @errors ) = $router->validate( $router->match( 'GET', '/loose' ), body => { count => 3 }, content_type => $form_type );
+    is( $status, 400, 'a field, to an operation with no requestBody, is a 400' );
+    like( \@errors, [qr/\/body\/count:[ ]the[ ]operation[ ]takes[ ]no[ ]body/], 'for that reason' );
+    ( $status, @errors ) = $router->validate( $router->match( 'GET', '/loose' ), body => {}, uploads => ['file'], content_type => $multipart );
+    is( $status, 400, 'and so is a file' );
+    like( \@errors, [qr/\/body\/file:/], 'named' );
+    is( [ $router->validate( $router->match( 'GET', '/loose' ), body => {}, content_type => $form_type ) ], [], 'but an empty body is not' );
+
+    my $route = $router->match( 'POST', '/upload' );
+    is( [ $router->validate( $route, body => { count => 3 }, uploads => ['file'], content_type => $multipart ) ], [], 'a field and a file that the schema names pass' );
+    ( $status, @errors ) = $router->validate( $route, body => { count => 3, junk => 1 }, content_type => $multipart );
+    is( $status, 400, 'a field that a schema without additionalProperties does not name is a 400' );
+    like( \@errors, [qr/\/body\/junk:[ ]the[ ]schema[ ]of[ ]multipart\/form-data/], 'which names the media type' );
+    ( $status, @errors ) = $router->validate( $route, body => { count => 3 }, uploads => ['other'], content_type => $multipart );
+    is( $status, 400, 'and so is a file that it does not name' );
+    like( \@errors, [qr/\/body\/other:/], 'named' );
+
+    ( $status, @errors ) = $router->validate( $route, body => { count => 3, file => 'x' }, content_type => $form_type );
+    is( $status, 400, 'the names are those of the media type that was sent, here a $ref' );
+    my $form_re = qr{application/x-www-form-urlencoded};
+    like( \@errors, [qr/\/body\/file:[ ]the[ ]schema[ ]of[ ]$form_re/], 'which does not name the file' );
+    is( [ $router->validate( $route, body => { count => 3 }, content_type => $form_type ) ], [], 'and does name the count' );
+
+    is( [ $router->validate( $router->match( 'POST', '/open' ), body => { count => 3, junk => 1 }, content_type => $form_type ) ], [], 'a schema with additionalProperties takes what it says it takes' );
+    ( $status, @errors ) = $router->validate( $router->match( 'POST', '/open/x' ), body => { slug => 'y' }, content_type => $form_type );
+    is( $status, 400, 'but not a name that the path or the query declares' );
+    like( \@errors, [qr/\/body\/slug:[ ]the[ ]path[ ]or[ ]the[ ]query/], 'for that reason' );
+};
+
+subtest 'one name in two places' => sub {
+    my $form  = { content => { 'application/x-www-form-urlencoded' => { schema => { type => 'object', properties => { limit => { type => 'integer' } } } } } };
+    my $query = { name    => 'limit', in => 'query', schema => { type => 'integer' } };
+    my $limit = qr/limit[ ]is[ ]a[ ]name[ ]of/;
+
+    like(
+        dies { TPSGI::Router->new( 'Test.pm' => document( '/a' => { post => operation( parameters => [$query], requestBody => $form ) } ) ) },
+        qr/POST[ ]\/a:[ ]$limit[ ]the[ ]query[ ]and[ ]of[ ]the[ ]body/,
+        'the query and the body die'
+    );
+    like(
+        dies { TPSGI::Router->new( 'Test.pm' => document( '/a/{limit}' => { get => operation( parameters => [ $query, path_parameter('limit') ] ) } ) ) },
+        qr/$limit[ ]the[ ]path[ ]and[ ]of[ ]the[ ]query/,
+        'and so do the path and the query'
+    );
+    like(
+        dies { TPSGI::Router->new( 'Test.pm' => document( '/a' => { get => operation( parameters => [$query], 'x-tpsgi-data' => { limit => 1 } ) } ) ) },
+        qr/x-tpsgi-data[ ]sets[ ]limit,[ ]which[ ]is[ ]a[ ]name/,
+        'and x-tpsgi-data that sets a name the request can give'
+    );
+    ok( lives { TPSGI::Router->new( 'Test.pm' => document( '/a' => { get => operation( parameters => [$query], 'x-tpsgi-data' => { other => 1 } ) } ) ) }, 'but not x-tpsgi-data of another name' ) or note $@;
 };
 
 subtest 'precedence' => sub {
