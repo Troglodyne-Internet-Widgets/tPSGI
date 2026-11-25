@@ -43,7 +43,14 @@ my %EVENT_NAMES  = map { $EVENT_NUMBER->{$_} => $_ } qw{
 
 =head2 get_config()
 
-Read ~/.tpsgi.ini and return a merged options hash.
+Read ~/.tpsgi.ini and return a merged options hash: the C<default> block of the
+file over the defaults, with each list option added to its default, and
+C<log_dir> and C<log_name> worked out from C<custom_log> and C<tpsgi_dir>.  It
+sets C<$ENV{HOME}> to the working directory when HOME is not set.
+
+Returns the options, as a list of pairs.
+
+    my %options = TPSGI::Startup::get_config();
 
 =cut
 
@@ -107,7 +114,13 @@ F<www/static>, and nginx serves that the same way, so a render made by code
 that has changed since would be served as that code made it.  A render has no
 file under F<www/>, so only C<renders> can tell it from a link whose file is
 gone.  With the file gone, the next request reaches serve() or the route,
-which makes it again.  Dies if it cannot remove a file.
+which makes it again.
+
+Returns the paths that it removed, as a list.
+
+Dies if it cannot remove a file.
+
+    my @removed = TPSGI::Startup::sweep_statics( TPSGI::Startup::get_config(), renders => 1 );
 
 =cut
 
@@ -142,9 +155,23 @@ sub sweep_statics (%options) {
 
 Set up inotify watches on the given directories (and any .pm files within them).
 These watches are flagged as 'restart' watches, which is what powers the
-autoreload feature (see TPSGI::handle_changes).
+autoreload feature (see TPSGI::handle_changes).  It prints each path that it
+watches on the standard output.
 
 Idempotent: no-op if the libdir watches are already active.
+
+=over 4
+
+=item @dirs - Str - each directory to watch
+
+=back
+
+Returns the watch descriptors of the libdirs, as a list, or nothing when they
+are watched already.
+
+Dies as add_watch() does, when a path cannot be watched.
+
+    my @wds = TPSGI::Startup::watch_for_changes('lib');
 
 =cut
 
@@ -178,7 +205,7 @@ sub watch_for_changes {
 =head2 add_watch(%args)
 
 Add an arbitrary file or directory to the watchlist, optionally with a callback
-to run when it changes.  Returns the inotify watch descriptor.
+to run when it changes.
 
 %args is:
 
@@ -206,6 +233,13 @@ any events not already in its mask are added to it.
 restart the server when a .pm within it changes, if autoreload is on.
 
 =back
+
+Returns Int, the inotify watch descriptor.
+
+Dies when there is no C<path>, when C<callback> is not a CODE reference or
+C<events> not an ARRAY reference, and when inotify cannot watch the path.
+
+    my $wd = TPSGI::Startup::add_watch( path => 'data', callback => sub { ... } );
 
 =cut
 
@@ -265,6 +299,16 @@ sub add_watch {
 
 Whether the passed path is already on the watchlist.
 
+=over 4
+
+=item path - Str - the path that add_watch() was given
+
+=back
+
+Returns Bool, true when it is watched.
+
+    my $watched = TPSGI::Startup::is_watched('data');
+
 =cut
 
 sub is_watched {
@@ -275,6 +319,16 @@ sub is_watched {
 =head2 remove_watch($path)
 
 Drop a path (and any callbacks registered against it) from the watchlist.
+
+=over 4
+
+=item path - Str - the path that add_watch() was given
+
+=back
+
+Returns Int, 1 when the path was watched and 0 when it was not.
+
+    TPSGI::Startup::remove_watch('data');
 
 =cut
 
@@ -295,12 +349,23 @@ sub remove_watch {
 
 =head2 rewatch($wd)
 
-Re-establish a watch which the kernel dropped out from under us.
+Re-establish a watch which the kernel dropped out from under us, with its
+events, its restart flag and its callbacks.
 
 Anything which writes a file "atomically" (write a tempfile, rename over the
 target) destroys the watch on the old inode, so watches on individual files are
-one-shot unless we put them back.  Returns the new watch descriptor, or undef
-when the path is simply gone now.
+one-shot unless we put them back.
+
+=over 4
+
+=item wd - Int - the watch descriptor that the kernel dropped
+
+=back
+
+Returns Int or undef: the new watch descriptor, or undef when the descriptor
+is not one of ours, the path is simply gone now, or it cannot be watched again.
+
+    my $new_wd = TPSGI::Startup::rewatch( $change->{wd} );
 
 =cut
 
@@ -334,7 +399,18 @@ sub rewatch {
 
 =head2 event_names($mask)
 
-Turn an inotify event mask into an ARRAY reference of event names.
+Turn an inotify event mask into an ARRAY reference of event names, in the order
+of their bits.
+
+=over 4
+
+=item mask - Int - the inotify event mask
+
+=back
+
+Returns ArrayRef[Str], the names.
+
+    my $names = TPSGI::Startup::event_names( $event->{mask} );
 
 =cut
 
@@ -363,6 +439,13 @@ tarbaby, so whichever worker reads first consumes the event for everyone.  This
 is why the callbacks you register need to be registered identically in every
 worker (declare them in your router module, which every worker loads) and need
 to be safe to run in any of them.
+
+Returns the changes, as a list of HASH references, or nothing when nothing is
+watched.
+
+    foreach my $change ( TPSGI::Startup::pending_changes() ) {
+        print "$change->{path} changed\n";
+    }
 
 =cut
 

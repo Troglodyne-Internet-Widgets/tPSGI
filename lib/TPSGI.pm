@@ -81,6 +81,16 @@ my $generic_handler;
 The UUID of the request being answered, which every log line carries.  A true
 $regenerate makes a new one, which app() does as each request comes in.
 
+=over 4
+
+=item regenerate - Bool - whether to make a new UUID
+
+=back
+
+Returns Str, the UUID.
+
+    my $uuid = $tpsgi->request_id;
+
 =cut
 
 sub request_id {
@@ -110,6 +120,10 @@ my sub log_line {
 The process's Log::Dispatch, made by build_log() the first time it is asked
 for.
 
+Returns Log::Dispatch, the one of the process.
+
+    $tpsgi->log->info("A line of my own\n");
+
 =cut
 
 sub log {    ## no critic (ProhibitBuiltinHomonyms) -- a method, which nothing calls as the builtin
@@ -124,6 +138,12 @@ sub log {    ## no critic (ProhibitBuiltinHomonyms) -- a method, which nothing c
 A new Log::Dispatch from the options: the rotated file at C<log_name>, the
 screen, and each class that C<loggers> names, which is loaded by name.  log()
 keeps the first one this makes.
+
+Returns Log::Dispatch, the new one.
+
+Dies when a class that C<loggers> names does not load.
+
+    my $log = $tpsgi->build_log;
 
 =cut
 
@@ -170,10 +190,30 @@ sub build_log {
     return $log;
 }
 
-=head2 DEBUG, INFO, NOTE, WARN, ERROR, CRIT, ALERT, EMERG, FATAL($message)
+=head2 DEBUG($msg), INFO($msg), NOTE($msg), WARN($msg), ERROR($msg), CRIT($msg), ALERT($msg), EMERG($msg), FATAL($msg)
 
-Log $message at that level, stamped with the time, the worker, the request and
+Log $msg at that level, stamped with the time, the worker, the request and
 the user.  FATAL logs at the emergency level and then dies with the line.
+
+=over 4
+
+=item msg - Str - the message; without one, the line says that none was passed
+
+=back
+
+Returns nothing.
+
+FATAL dies with the line that it logged.
+
+    $tpsgi->DEBUG("Rendering $path");
+    $tpsgi->INFO("GET 200 $fullpath");
+    $tpsgi->NOTE("Rebuilt the index");
+    $tpsgi->WARN("Could not link $path");
+    $tpsgi->ERROR("Request failed: $err");
+    $tpsgi->CRIT("The database is gone");
+    $tpsgi->ALERT("The disk is full");
+    $tpsgi->EMERG("Cannot go on");
+    $tpsgi->FATAL("Cannot go on, and stopping");
 
 =cut
 
@@ -225,10 +265,6 @@ sub FATAL {
 =head2 new(%options)
 
 Load the routers, and build the TPSGI::Router of their C<%openapi> documents.
-It dies unless it runs as C<user>, and C<http_user> and C<tpsgi_dir> are set.
-It also dies when a router does not load, when its document is not one that
-TPSGI::Router accepts, and when a router still defines C<@routes> instead of
-C<%openapi>.
 
 new() runs for every request, and compiling a document takes much longer than
 answering one.  So the router is built once in each worker, for each list of
@@ -242,6 +278,15 @@ get_config() returns the options, and among them are:
     routers
     loggers
     auth
+
+Returns TPSGI, the server for the request.
+
+It dies unless it runs as C<user>, and C<http_user> and C<tpsgi_dir> are set,
+and when C<http_user> names no group.  It also dies when a router does not
+load, when its document is not one that TPSGI::Router accepts, and when a
+router still defines C<@routes> instead of C<%openapi>.
+
+    my $tpsgi = TPSGI->new( TPSGI::Startup::get_config() );
 
 =cut
 
@@ -332,6 +377,10 @@ sub new {
 
 The router that new() built from the C<%openapi> of every router.
 
+Returns TPSGI::Router, the router.
+
+    my $route = $tpsgi->routes->match( 'GET', '/hello' );
+
 =cut
 
 sub routes {
@@ -341,7 +390,35 @@ sub routes {
 
 =head2 serve($fullpath, $path, $start, $streaming, $ranges, $last_fetch, $deflate)
 
-Serve a file, with options to stream and cache the output.
+Serve a file, with options to stream and cache the output.  A request with
+ranges, on a server that streams, gets serve_ranges().  A file larger than
+C<$CHUNK_SIZE>, on a server that streams, is streamed.  Otherwise a client that
+takes gzip gets the file compressed, and the file is linked into
+F<www/static> under C<tpsgi_dir>.  A file that cannot be opened gets a 403.
+
+=over 4
+
+=item fullpath - Str - the URL that was asked for, for the log
+
+=item path - Str - the path of the file
+
+=item start - ArrayRef[Int] - when the request started, as gettimeofday() gives it
+
+=item streaming - Bool - whether the server streams, as C<psgi.streaming> says
+
+=item ranges - ArrayRef[ArrayRef] - the ranges that parse_ranges() returns
+
+=item last_fetch - Int - the epoch of C<If-Modified-Since>, or 0; a file not modified since gets a 304
+
+=item deflate - Bool - whether the client takes gzip
+
+=back
+
+Returns ArrayRef or CodeRef, the PSGI response.
+
+Dies when it cannot make the directory in F<www/static> for the link.
+
+    return $tpsgi->serve( $query->{fullpath}, "www$path", $query->{start}, $query->{streaming}, $query->{ranges}, $query->{last_fetched}, $query->{deflate} );
 
 =cut
 
@@ -446,14 +523,25 @@ sub serve {    ## no critic (ProhibitManyArgs) -- routers call it with these, in
 =head2 serve_ranges($fh, $ranges, %args) = PSGI response
 
 Answer a Range request from $fh with a 206, or a 416 when a range is outside
-the file.  $ranges is what parse_ranges() returns, and %args is C<size>, the
-size of the file, C<headers>, a HASH reference of the response headers so far,
-and C<fullpath>, the URL for the log.  More than one range is answered as
-multipart/byteranges.
+the file.  %args is C<size>, the size of the file, C<headers>, a HASH reference
+of the response headers so far, and C<fullpath>, the URL for the log.  More
+than one range is answered as multipart/byteranges.
 
 A suffix range, C<bytes=-N>, is the last N bytes, or the whole file when it is
 shorter than N.  C<bytes=-0>, and a range whose ends are not whole numbers, get
 the 416.
+
+=over 4
+
+=item fh - GlobRef - the open file, which the response closes
+
+=item ranges - ArrayRef[ArrayRef] - what parse_ranges() returns; the ends are filled in place
+
+=back
+
+Returns ArrayRef or CodeRef, the PSGI response: the 416, or a stream of the 206.
+
+    return $tpsgi->serve_ranges( $fh, \@ranges, size => -s $fh, headers => { 'Content-type' => 'text/plain' }, fullpath => $fullpath );
 
 =cut
 
@@ -545,9 +633,21 @@ my sub generic {
     return [ $code, [ $ct => $content_types{html} ], ["$type"] ];
 }
 
-=head2 redirect, redirect_permanent, see_also
+=head2 redirect($to), redirect_permanent($to), see_also($to)
 
-Redirects to the provided page.
+Redirect to $to: with a 302, a 301 and a 303.
+
+=over 4
+
+=item to - Str - the URL to send the client to
+
+=back
+
+Returns ArrayRef, the PSGI response.
+
+    return $tpsgi->redirect('/login');
+    return $tpsgi->redirect_permanent('https://test.test/');
+    return $tpsgi->see_also("/posts/$id");
 
 =cut
 
@@ -569,9 +669,22 @@ sub see_also {
     return [ 303, [ "Location" => $to, "Content-Length" => 0 ], [''] ];
 }
 
-=head2 ok
+=head2 ok($query, $body)
 
-Return a generic HTTP 200 OK
+Return a generic HTTP 200 OK, the page that the router's C<generic_route()>
+makes when it has one.
+
+=over 4
+
+=item query - HashRef - the query, whose C<method> and C<fullpath> go to the log
+
+=item body - Str - the text of the page; C<Ok> without one
+
+=back
+
+Returns ArrayRef, the PSGI response, or what C<generic_route()> returns.
+
+    return $tpsgi->ok( $query, 'Saved' );
 
 =cut
 
@@ -582,7 +695,7 @@ sub ok {
     return generic( $body, 200, $query );
 }
 
-=head2 notfound, forbidden, badrequest, notallowed, unsupported, toolong, error, unavailable
+=head2 notfound($query, $body), forbidden($query, $body), badrequest($query, $body), notallowed($query, @allow), unsupported($query, $body), toolong($query, $body), error($query, $body), unavailable($query, $body)
 
 If you need to return these HTTP errors, return these within a route:
 
@@ -591,6 +704,31 @@ If you need to return these HTTP errors, return these within a route:
         ...
         return $self->notfound($query);
     }
+
+They answer 404, 403, 400, 405, 415, 419, 500 and 503, with the page that the
+router's C<generic_route()> makes when it has one.  notallowed() adds an
+C<Allow> header of @allow to its own page.  error() logs a C<?> for a method or
+path that $query does not hold.
+
+=over 4
+
+=item query - HashRef - the query, whose C<method> and C<fullpath> go to the log
+
+=item body - Str - the text of the page; the name of the status without one
+
+=item @allow - Str - each method that the path does have
+
+=back
+
+Returns ArrayRef, the PSGI response, or what C<generic_route()> returns.
+
+    return $tpsgi->forbidden( $query, 'Log in first' );
+    return $tpsgi->notallowed( $query, 'GET', 'HEAD' );
+    return $tpsgi->badrequest($query);
+    return $tpsgi->unsupported($query);
+    return $tpsgi->toolong($query);
+    return $tpsgi->error( $query, $@ );
+    return $tpsgi->unavailable($query);
 
 =cut
 
@@ -658,7 +796,18 @@ my $cur_query = {};
 =head2 app($env) = PSGI response
 
 The PSGI application: respond() to the request, or answer it with error() when
-that dies.
+that dies.  The error goes to C<psgi.errors> and to the log, and the page shows
+only its first line unless TPSGI_DEBUG is set.
+
+=over 4
+
+=item env - HashRef - the PSGI environment
+
+=back
+
+Returns ArrayRef or CodeRef, the PSGI response.
+
+    my $response = $tpsgi->app($env);
 
 =cut
 
@@ -684,7 +833,8 @@ sub app {
 =head2 cannot_start($error, $env, %options) = ARRAYREF
 
 What to answer with when new() died, so there is no object to answer with.
-Usually a router that would not load: a missing module, a syntax error.
+Usually a router that would not load: a missing module, a syntax error.  A
+function, not a method.
 
 The error goes to psgi.errors, and to the log by way of a stand-in built from
 the same options, so it lands in the same places a request's own errors do.  If
@@ -702,6 +852,18 @@ leaves its file in %INC as a failure, and every later require of it in this
 process says only "Attempt to reload ... aborted" -- so a load that failed
 once, to a race or a lock, would otherwise fail for every request the worker
 ever serves.  A fresh worker tries again from nothing.
+
+=over 4
+
+=item error - Str - what new() died with
+
+=item env - HashRef|Undef - the PSGI environment, when there is one
+
+=back
+
+Returns ArrayRef, the PSGI response of the 500.
+
+    my $tpsgi = eval { TPSGI->new(%options) } or return TPSGI::cannot_start( $@, $env, %options );
 
 =cut
 
@@ -737,6 +899,16 @@ Answer one request: from a route when one matches, by running a CGI when the
 file under F<www/> is executable, and otherwise by serving the file.  A path
 that a route matches, with a method that no route of it has, gets
 notallowed().
+
+=over 4
+
+=item env - HashRef - the PSGI environment
+
+=back
+
+Returns ArrayRef or CodeRef, the PSGI response.
+
+    my $response = $tpsgi->respond($env);
 
 =cut
 
@@ -871,6 +1043,16 @@ sub respond {
 
 $path, lowercased on the systems whose filesystems ignore case.
 
+=over 4
+
+=item path - Str - the path of a file
+
+=back
+
+Returns Str, the path to look for.
+
+    my $file = $tpsgi->mangle_filename("www/$path");
+
 =cut
 
 sub mangle_filename {
@@ -886,7 +1068,17 @@ sub mangle_filename {
 
 The byte ranges of the request's Range header, as ARRAY references of start
 and end.  An end that the header leaves out is undef.  If-Range without Range
-asks for the whole file.
+asks for the whole file.  A function, not a method.
+
+=over 4
+
+=item env - HashRef - the PSGI environment
+
+=back
+
+Returns the ranges, as a list, each an ARRAY reference of the start and the end.
+
+    my @ranges = TPSGI::parse_ranges($env);
 
 =cut
 
@@ -910,11 +1102,22 @@ sub parse_ranges {
 
 my @executable_extensions = qw{cgi sh exe pl php py};
 
-=head2 appears_executable($path) = BOOL
+=head2 appears_executable($subj) = BOOL
 
-Whether $path is a CGI to run rather than a file to serve: it is executable,
+Whether $subj is a CGI to run rather than a file to serve: it is executable,
 and its name has no extension or one of C<cgi>, C<sh>, C<exe>, C<pl>, C<php>
-and C<py>.  The extension is what follows the last dot of the name.
+and C<py>.  The extension is what follows the last dot of the name.  A
+function, not a method.
+
+=over 4
+
+=item subj - Str - the path of the file, or a false value for none
+
+=back
+
+Returns Bool, 1 or 0.
+
+    my $runs = TPSGI::appears_executable('www/cgi-bin/hello.cgi');
 
 =cut
 
@@ -938,6 +1141,16 @@ C<cgi_dirs> names none by default, so tPSGI serves every file as it is,
 whatever its mode.  A path with a C<..> segment is never a CGI, since it
 could start inside one of them and end outside it.
 
+=over 4
+
+=item path - Str - the path of the file, or a false value for none
+
+=back
+
+Returns Bool, 1 or 0.
+
+    return $tpsgi->cgi( $env, $fullpath, $file, $last_fetch ) if $tpsgi->is_cgi($file);
+
 =cut
 
 sub is_cgi ( $self, $path ) {
@@ -959,6 +1172,25 @@ C<start>, C<last_fetch>, C<deflate>, C<domain> and C<port>.
 C<query_string> in the query is the query string as the client sent it, still
 encoded, or an empty string when there is none.  A callback that sends the
 client to another host can pass it on unchanged.
+
+When add_post_close_callback() queued callbacks, route() answers with
+stream_raw_psgi(), which exits the worker.
+
+=over 4
+
+=item route - HashRef - what TPSGI::Router::match() returned
+
+=item env - HashRef - the PSGI environment
+
+=back
+
+Returns ArrayRef or CodeRef, the PSGI response: what the callback returned, or
+the 400 or 415 of a request that the operation refuses.
+
+Dies when the callback returns neither a CODE reference nor an ARRAY reference
+of three elements.
+
+    return $tpsgi->route( $route, $env, fullpath => $fullpath, path => $path, start => [gettimeofday] );
 
 =cut
 
@@ -1052,6 +1284,21 @@ over the last.  First TPSGI::Router::validate() checks the request against the
 operation.  A request that fails gets unsupported() for a 415 and badrequest()
 for a 400, and the reasons go to the log at the debug level.
 
+=over 4
+
+=item path - Str - the path of the request, for the log
+
+=item route - HashRef - what TPSGI::Router::match() returned
+
+=item env - HashRef - the PSGI environment
+
+=back
+
+Returns HashRef or ArrayRef: the query, or the PSGI response of a request that
+fails validation.
+
+    my $query = $tpsgi->extract_query( $path, $route, $env );
+
 =cut
 
 sub extract_query {
@@ -1105,7 +1352,26 @@ sub extract_query {
 =head2 cgi($env, $fullpath, $file_actual, $last_fetch) = PSGI response
 
 Run $file_actual as a CGI.  Read until we are done with headers, then pass off
-the filehandle to PSGI for streaming.
+the filehandle to PSGI for streaming.  The status is 500 when the CGI gives
+none.
+
+=over 4
+
+=item env - HashRef - the PSGI environment, which becomes the CGI's %ENV
+
+=item fullpath - Str - the URL that was asked for, for the log
+
+=item file_actual - Str - the path of the CGI
+
+=item last_fetch - Int - the epoch of C<If-Modified-Since>, or 0
+
+=back
+
+Returns CodeRef, the streaming PSGI response.
+
+Dies when it cannot run the CGI.
+
+    return $tpsgi->cgi( $env, $fullpath, 'www/cgi-bin/hello.cgi', 0 );
 
 =cut
 
@@ -1139,11 +1405,21 @@ sub cgi {
 =head2 stream_raw_cgi($cgi)
 
 Run the perl file $cgi in this process, as a CGI: its STDIN is the request body,
-and what it prints goes to the client.  The worker exits when it is done.
+and what it prints goes to the client.
 
 Use when you just have a .cgi file you want to run without pipe-open.
 XXX this is extraordinarily unsafe, inefficient and kills workers.
 But sometimes you have to bite the bullet and do this to migrate stuff effectively.
+
+=over 4
+
+=item cgi - Str - the path of the perl file
+
+=back
+
+Returns nothing: the worker exits when it is done.
+
+    $tpsgi->stream_raw_cgi('www/legacy.cgi');
 
 =cut
 
@@ -1166,11 +1442,23 @@ sub stream_raw_cgi {
     exit 0;
 }
 
-=head2 stream_raw_psgi($response, $query)
+=head2 stream_raw_psgi($response, $data)
 
 Write the PSGI $response straight to the client's socket, close it, then run
 the callbacks that add_post_close_callback() queued.  route() does this when
-there are any.  The worker exits when it is done.
+there are any.  A callback that dies is logged, and the rest still run.
+
+=over 4
+
+=item response - ArrayRef - the PSGI response, with its body as one string
+
+=item data - HashRef - the query of the request, whose C<start> times it
+
+=back
+
+Returns nothing: the worker exits when it is done.
+
+    $tpsgi->stream_raw_psgi( [ 200, [ 'Content-Type' => 'text/plain' ], ['Ok'] ], $query );
 
 =cut
 
@@ -1209,12 +1497,32 @@ sub stream_raw_psgi {
     exit 0;
 }
 
-=head2 stream_raw_http($query, $last_fetch, $to_fork, $callback, $error_handler)
+=head2 stream_raw_http($data, $last_fetch, $to_fork, $callback, $error_handler)
 
 Answer with a 200 whose headers and body a forked child prints: $to_fork runs
 in the child with the client's socket selected, and then $error_handler, when
 there is one.  Once the child exits and the socket is closed, $callback runs.
-The worker exits when it is done.
+What each of them dies with is logged.
+
+=over 4
+
+=item data - HashRef - the query of the request, for the Server-Timing header
+
+=item last_fetch - Int - the epoch of C<If-Modified-Since>, which it does not read
+
+=item to_fork - CodeRef - what prints the rest of the headers and the body
+
+=item callback - CodeRef|Undef - what to run after the socket is closed
+
+=item error_handler - CodeRef|Undef - what to run in the child after $to_fork
+
+=back
+
+Returns nothing: the worker exits when it is done.
+
+Dies when it cannot fork.
+
+    $tpsgi->stream_raw_http( $query, 0, sub { print "Content-Type: text/plain\n\nHello" } );
 
 =cut
 
@@ -1262,11 +1570,28 @@ sub stream_raw_http {    ## no critic (ProhibitManyArgs) -- routers call it with
     exit 0;
 }
 
-=head2 extract_headers($fh, $last_fetch)
+=head2 extract_headers($fh, $last_fetch, $is_ref)
 
-Extract the headers from a filehandle.  Set the 'Last Modified' header appropriately based on the output of `stat` on the filehandle.
+Extract the headers from a filehandle, and leave it at the start of the body.
+Set the 'Last Modified' header appropriately based on the output of `stat` on
+the filehandle.  A function, not a method.
 
-Returns a code and parsed headers hash.  Code will be 304 if the file hasn't changed since $last_fetch, otherwise will be the code in the parsed headers.
+=over 4
+
+=item fh - GlobRef - the output of a CGI
+
+=item last_fetch - Int - the epoch of C<If-Modified-Since>, or 0
+
+=item is_ref - Bool - true to keep the status of the headers and set no C<Last-Modified>, for a handle that stat() cannot describe
+
+=back
+
+Returns the code, the offset of the body in $fh, and the parsed headers as
+pairs, as a list.  The code is 304 if the file hasn't changed since
+$last_fetch, and otherwise the status of the headers, which is undef when they
+give none.  With $is_ref it is that status, or 200.
+
+    my ( $code, $offset, %headers ) = TPSGI::extract_headers( $out, $last_fetch );
 
 =cut
 
@@ -1301,14 +1626,30 @@ sub extract_headers {
 
 TPSGI::Startup::get_config(): F<~/.tpsgi.ini>, over the defaults.
 
+Returns the options, as a list of pairs.
+
+    my %options = TPSGI->get_config;
+
 =cut
 
 sub get_config { return TPSGI::Startup::get_config() }
 
-=head2 checkpoint($query, $name)
+=head2 checkpoint($data, $name)
 
 Mark the time as $name, for the Server-Timing header that
 build_server_timing() makes.
+
+=over 4
+
+=item data - HashRef - the query of the request, which keeps the checkpoints
+
+=item name - Str - the name of the step that ends now
+
+=back
+
+Returns nothing.
+
+    $tpsgi->checkpoint( $query, 'render' );
 
 =cut
 
@@ -1319,10 +1660,21 @@ sub checkpoint {
     return;
 }
 
-=head2 build_server_timing($query) = STRING
+=head2 build_server_timing($data) = STRING
 
 A Server-Timing header value: how long each checkpoint() took after the one
-before it, and the total since the request started.
+before it, and the total since the request started.  It removes the
+checkpoints from $data.
+
+=over 4
+
+=item data - HashRef - the query of the request, with its C<start> and checkpoints
+
+=back
+
+Returns Str, the value of the header.
+
+    push( @headers, 'Server-Timing' => $tpsgi->build_server_timing($query) );
 
 =cut
 
@@ -1345,9 +1697,20 @@ sub build_server_timing {
     return join( ', ', @st );
 }
 
-=head2 add_post_close_callback()
+=head2 add_post_close_callback($cb)
 
-Add a thing to do after closing stdout; useful for housekeeping that doesn't need to hold up pageload.
+Add a thing to do after closing stdout; useful for housekeeping that doesn't
+need to hold up pageload.  route() runs them with stream_raw_psgi().
+
+=over 4
+
+=item cb - CodeRef - what to run
+
+=back
+
+Returns nothing.
+
+    $tpsgi->add_post_close_callback( sub { $tpsgi->invalidate_renders('html') } );
 
 =cut
 
@@ -1359,7 +1722,12 @@ sub add_post_close_callback {
 
 =head2 signal_restart_parent()
 
-Instruct tPSGI to reload after closing stdout.
+Instruct tPSGI to reload after closing stdout: queue a HUP to the parent
+process with add_post_close_callback().
+
+Returns nothing.
+
+    $tpsgi->signal_restart_parent;
 
 =cut
 
@@ -1371,14 +1739,33 @@ sub signal_restart_parent {
 
 =head2 save_render($path, $extension, $body)
 
-Save a static render of the page.
-Good to queue after closing stdout.
+Save a static render of the page, as F<www/static> under C<tpsgi_dir>.
+Good to queue after closing stdout.  It does nothing without a path or an
+extension.
 
-Passed file extension slapped on the end of the path.
-You can then serve them as statics with an appropriately done try_files block in nginx.
+Passed file extension slapped on the end of the path.  A path that ends with a
+slash is saved as its C<index>, and the extensions C<text> and C<blob> are saved
+as C<txt> and C<bin>.  You can then serve them as statics with an
+appropriately done try_files block in nginx.
 
 A render and the directories made for it take their modes from the umask, and their group
 from the worker, so the web server reads them when the worker runs as its group.
+
+=over 4
+
+=item path - Str - the path of the page
+
+=item extension - Str - the extension of the file
+
+=item body - Str - what the page is
+
+=back
+
+Returns nothing.
+
+Dies when it cannot make the directory, or open or write the file.
+
+    $tpsgi->save_render( '/posts/', 'html', $html );
 
 =cut
 
@@ -1429,7 +1816,22 @@ sub save_render {
 
 =head2 invalidate_render($path, $extension)
 
-Remove an existing static render of a path.
+Remove an existing static render of a path, which save_render() saved with the
+same arguments.  It does nothing without a path or an extension, or when there
+is no such render.
+
+=over 4
+
+=item path - Str - the path of the page
+
+=item extension - Str - the extension of the file
+
+=back
+
+Returns Int, 1 when it removed the render and 0 when it could not, or nothing
+when there was nothing to remove.
+
+    $tpsgi->invalidate_render( '/posts/index', 'html' );
 
 =cut
 
@@ -1456,6 +1858,16 @@ sub invalidate_render {
 Remove all existing static renders with the provided extension.
 Useful when it's not easy to figure out what to re-render due to including templates in other templates, etc.
 
+=over 4
+
+=item extension - Str - the extension of the files
+
+=back
+
+Returns nothing.
+
+    $tpsgi->invalidate_renders('html');
+
 =cut
 
 sub invalidate_renders {
@@ -1479,6 +1891,17 @@ sub invalidate_renders {
 TPSGI::Startup::watch_for_changes(), which watches the .pm files under @dirs for
 autoreload.  A function, not a method.
 
+=over 4
+
+=item @dirs - Str - each directory to watch
+
+=back
+
+Returns the inotify watch descriptors, as a list, or nothing when the
+directories are watched already.
+
+    my @wds = TPSGI::watch_for_changes('lib');
+
 =cut
 
 sub watch_for_changes {
@@ -1489,7 +1912,7 @@ sub watch_for_changes {
 =head2 add_watch($path, $callback, %options)
 
 Add an arbitrary file or directory to the inotify watchlist, along with a
-callback to run when it changes.  Returns the inotify watch descriptor.
+callback to run when it changes.
 
 The callback is invoked as:
 
@@ -1537,6 +1960,17 @@ the file is deleted and not immediately recreated, the watch is gone for good.
 
 =back
 
+=over 4
+
+=item path - Str - the file or directory to watch
+
+=item callback - CodeRef - what to run when it changes
+
+=back
+
+Returns Int or undef: the inotify watch descriptor, or undef, with a warning in
+the log, when the path cannot be watched.
+
 =cut
 
 sub add_watch {
@@ -1570,6 +2004,16 @@ sub add_watch {
 
 Drop a path, and any callbacks registered against it, from the watchlist.
 
+=over 4
+
+=item path - Str - the path that add_watch() was given
+
+=back
+
+Returns Int, 1 when the path was watched and 0 when it was not.
+
+    $tpsgi->remove_watch('data/posts.json');
+
 =cut
 
 sub remove_watch {
@@ -1580,10 +2024,14 @@ sub remove_watch {
 =head2 handle_changes
 
 Drain the inotify queue, running the callbacks registered for whatever changed.
-If a module in a libdir changed and autoreload is on, remove the renders, as
-TPSGI::Startup::sweep_statics() does with C<renders>, so that no page that the
-old code rendered is served, and restart tPSGI.  Powers both the autorestart
-feature and app-registered watches.
+A callback that dies is logged.  If a module in a libdir changed and autoreload
+is on, remove the renders, as TPSGI::Startup::sweep_statics() does with
+C<renders>, so that no page that the old code rendered is served, and restart
+tPSGI.  Powers both the autorestart feature and app-registered watches.
+
+Returns Int, always 0.
+
+    $tpsgi->handle_changes;
 
 =cut
 
@@ -1640,6 +2088,10 @@ sub handle_changes {
 =head2 restart_if_changes
 
 Deprecated alias for handle_changes().
+
+Returns Int, always 0.
+
+    $tpsgi->restart_if_changes;
 
 =cut
 

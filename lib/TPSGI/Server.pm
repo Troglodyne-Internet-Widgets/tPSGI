@@ -38,6 +38,11 @@ C<SigHUPed> and C<client>.  t/TPSGI-Server.t pins that.
 
 Starman's, then the HUP handler described above.  It replaces the one
 Net::Server::PreFork installs in run_child(), which runs before this hook.
+Net::Server calls it in each worker as the worker starts.
+
+Returns nothing.
+
+    $server->child_init_hook;
 
 =cut
 
@@ -61,7 +66,12 @@ sub child_init_hook {
 =head2 accept() = BOOL
 
 True when there is a connection to answer, even when a HUP made
-Net::Server::accept() say otherwise.
+Net::Server::accept() say otherwise.  Net::Server calls it in each worker for
+each connection.
+
+Returns Bool, 1 or 0.
+
+    my $connected = $server->accept;
 
 =cut
 
@@ -88,6 +98,13 @@ while the server was down.  sig_hup leaves the renders, because an application
 sends a HUP when it saves its data, and removes the renders that the save
 changed.  When autoreload restarts the server for changed code,
 TPSGI::handle_changes() removes them.
+
+Returns what the method of Starman::Server returns.
+
+Dies as TPSGI::Startup::sweep_statics() does, when it cannot remove a static.
+
+    $server->pre_loop_hook;
+    $server->sig_hup;
 
 =cut
 
