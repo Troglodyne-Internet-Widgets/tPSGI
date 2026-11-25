@@ -30,6 +30,27 @@ Every module and every test says `use 5.040`, and `perl:` in
 that file names the policies that this version of perl makes unnecessary.  So
 if you raise or lower the floor, change the profile as well as the `use` lines.
 
+A test that passes on one perl says nothing about another.  Before you say
+that a change works, run the tests on a perl of the floor and on the newest
+perl that you have.  perlbrew has the perls that are not on the `PATH`.
+`perlbrew list` names them, and `perlbrew exec` runs the tests with one:
+
+```
+perlbrew list
+perlbrew exec --with perl-5.42.3 prove -lr t
+```
+
+If perlbrew has no perl of the floor, `perlbrew install` builds one, for
+example `perlbrew install perl-5.42.3`.  If a perl of perlbrew lacks a
+prerequisite, install the prerequisites into that perl.  Run `cpanm` with that
+perl, so that it installs there:
+
+```
+dzil listdeps | grep -vx perl | xargs ~/perl5/perlbrew/perls/perl-5.42.3/bin/perl "$(command -v cpanm)" --notest
+```
+
+In the pull request, name each perl that you ran the tests on.
+
 ## Where it is written down
 
 | | |
@@ -55,13 +76,17 @@ Before you commit, apply these skills in this order:
    finds a call out to the shell, and a comment that belongs in the commit
    message.
 
-Then run `podchecker` on each changed file.  Run `perl -Ilib -c` on each
-changed script that no test loads, because the tests do not compile it.
+Then run `dzil podchecker` on the changed files, for example `dzil podchecker
+lib/Foo/Bar.pm`.  It reads the POD as Pod::Weaver writes it into the build.
+`podchecker` on a source file reports each `=func`, `=method` and `=attr` as an
+error, so its verdict says nothing here.  Run `perl -Ilib -c` on each changed
+script that no test loads, because the tests do not compile it.
 
 The pre-commit hook does the rest.  It tidies the Perl that you staged, runs
 perlcritic on it, and runs the tests that the commit can break, which
-`tests-covering` chooses.  The post-commit hook keeps the records of
-`tests-covering` up to date, in the background.  If a step fails, the hook stops the
+`tests-covering` chooses.  The post-commit, post-merge and post-rewrite hooks
+keep the records of `tests-covering` up to date, in the background, after a
+commit, a pull and a rebase.  If a step fails, the hook stops the
 commit and prints the reason.  Do not run `perltidy` or `perlcritic` yourself,
 and do not run the tests to decide whether a change is ready to commit.
 
@@ -74,11 +99,12 @@ prove -lv t/<file>.t
 
 Do the same to see a new test fail before you fix what it tests.
 
-In each clone that you commit from, install both hooks once.  Git does not
+In each clone that you commit from, install the hooks once.  Git does not
 install them for you, and without the hooks the tree drifts from its style:
 
 ```
-cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
+cp git-hooks/pre-commit git-hooks/post-commit git-hooks/post-merge \
+   git-hooks/post-rewrite git-hooks/refresh-coverage .git/hooks/
 ```
 
 A file that no test loads, such as a fixture, gets its tests from
@@ -104,6 +130,10 @@ dzil authordeps --missing | cpanm --notest
 dzil build && dzil test --release
 ```
 
+The version and the entry in `Changes` come from git.  Do not edit either by
+hand.  The version is the last release tag plus one.  The entry is the
+`Changelog:` trailers of the commits since that tag.
+
 ## Commits and pull requests
 
 Make a branch.  Do not commit to the default branch.
@@ -115,6 +145,17 @@ name".  The message has a job.  `perl-slop:reading-perl` describes a person who
 finds your line with `git blame` two years from now.  The message is the only
 thing that can still tell that person why.  For the same reason, the why goes
 in the message and not in a comment.
+
+If a user of the distribution can see the change, end the message with a
+`Changelog:` trailer.  Its value is the line for `Changes`, written for that
+user:
+
+```
+git commit --trailer 'Changelog: Refuse a pool that does not take O_DIRECT'
+```
+
+A commit that a user cannot see, such as a tidy or a change to a test, gets no
+trailer.  If no commit since the last release has one, the release stops.
 
 After you make sure that something works, say what you ran and what it said.
 A claim that the tests pass needs the line that shows them passing.  A claim

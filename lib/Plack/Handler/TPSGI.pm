@@ -18,7 +18,18 @@ bin/tarbaby asks Plack::Runner for it as C<server =E<gt> 'TPSGI'>.
 =head2 run($app)
 
 Plack::Handler::Starman::run() names Starman::Server outright, so this is
-that, less its Server::Starter support, which tPSGI does not use.
+that, less its Server::Starter support, which tPSGI does not use.  Each option
+whose name starts with C<net_server_> goes to Net::Server without that prefix.
+
+=over 4
+
+=item app - CodeRef - the PSGI application
+
+=back
+
+Returns what the run() of TPSGI::Server returns, when the server stops.
+
+    Plack::Handler::TPSGI->new( port => 5000 )->run($app);
 
 =cut
 

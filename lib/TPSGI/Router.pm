@@ -82,10 +82,14 @@ my %rank = (
 Compile the documents.  @pairs is a list of names and documents, for example
 the file of each router and its C<%openapi>.  The name goes into each error.
 
+Returns TPSGI::Router, the router.
+
 new() dies with the reason when a document is not valid OpenAPI 3, when an
 operation has no C<x-tpsgi-callback>, or when its callback is a name that is
 not a defined sub.  It also dies on two templates that differ only in the names
 of their variables, and on one template and method in two documents.
+
+    my $router = TPSGI::Router->new( 'lib/My/Routes.pm' => \%My::Routes::openapi );
 
 =cut
 
@@ -111,7 +115,17 @@ C<use 5.040> gives a router, is a Cpanel::JSON::XS boolean.  JSON::Validator
 5.19 compares C<enum> values by a checksum, so a native true does not equal
 the true of the OpenAPI schema, and C<required =E<gt> true> fails.  Hashes and
 arrays are copied.  Every other reference is kept, so a callback stays the
-same sub.
+same sub.  A function, not a method.
+
+=over 4
+
+=item data - Any - the data to copy, such as a document
+
+=back
+
+Returns Any, the copy.
+
+    my $document = TPSGI::Router::json_booleans( \%My::Routes::openapi );
 
 =cut
 
@@ -147,6 +161,22 @@ sub json_booleans {
 Check $document as OpenAPI 3, and add each of its operations.  new() calls it
 for each pair.
 
+=over 4
+
+=item name - Str - the name of the document, for the errors
+
+=item document - HashRef - the OpenAPI 3 document
+
+=back
+
+Returns nothing.
+
+Dies, as new() says, when $document is not a HASH reference, is not valid
+OpenAPI 3, has an operation without a callback, or has a template and method
+that another document has.
+
+    $router->add_document( 'lib/My/Routes.pm', \%My::Routes::openapi );
+
 =cut
 
 sub add_document {
@@ -181,9 +211,23 @@ sub add_document {
 
 =head2 matcher_for($name, $template) = HASHREF
 
-The compiled form of $template, made the first time it is asked for.  It dies
-when $template is not a template, and when another template differs from it
-only in the names of its variables.
+The compiled form of $template, made the first time it is asked for.
+
+=over 4
+
+=item name - Str - the name of the document, for the errors
+
+=item template - Str - the template
+
+=back
+
+Returns HashRef, what compile_template() returns, with the operations of the
+template in C<methods>.
+
+It dies when $template is not a template, and when another template differs
+from it only in the names of its variables.
+
+    my $matcher = $router->matcher_for( 'lib/My/Routes.pm', '/sitemap/{map}.xml' );
 
 =cut
 
@@ -204,9 +248,22 @@ sub matcher_for {
 
 A function.  The compiled form of $template: its regular expression, the names of
 its variables, the rank of each segment, its count of literal characters, and
-its shape, which is the template with every variable name left out.  It dies
-when the template does not start with a slash, when a brace is not part of a
-variable, and when a C<{name+}> is not the whole last segment.
+its shape, which is the template with every variable name left out.
+
+=over 4
+
+=item template - Str - the template
+
+=back
+
+Returns HashRef, with C<template>, C<regex>, C<variables>, C<ranks>,
+C<literal_length>, C<literal>, C<shape>, and an empty C<methods>.
+
+It dies when the template does not start with a slash, when a brace is not
+part of a variable, when a variable is empty, and when a C<{name+}> is not the
+whole last segment.
+
+    my $matcher = TPSGI::Router::compile_template('/lib/{module+}');
 
 =cut
 
@@ -264,10 +321,22 @@ sub compile_template {
     };
 }
 
-=head2 by_precedence($a, $b) = INTEGER
+=head2 by_precedence($left, $right) = INTEGER
 
-A function, for sort.  Below zero when the compiled template $a is tried
-before $b, as DESCRIPTION says.
+A function, for sort.  Below zero when the compiled template $left is tried
+before $right, as DESCRIPTION says.
+
+=over 4
+
+=item left - HashRef - a template that compile_template() compiled
+
+=item right - HashRef - another one
+
+=back
+
+Returns Int, below zero, zero, or above zero.
+
+    my @ordered = sort { TPSGI::Router::by_precedence( $a, $b ) } @matchers;
 
 =cut
 
@@ -285,8 +354,22 @@ sub by_precedence {
 =head2 resolve_callback($what, $callback) = CODE
 
 A function.  $callback when it is a CODE reference, and the sub that it names
-when it is a fully qualified name.  It dies, and names $what, when there is no
-callback or no such sub.
+when it is a fully qualified name.
+
+=over 4
+
+=item what - Str - the operation, for the errors
+
+=item callback - CodeRef|Str - the C<x-tpsgi-callback> of the operation
+
+=back
+
+Returns CodeRef, the callback.
+
+It dies, and names $what, when there is no callback, when it is another kind
+of reference, or when no such sub is defined.
+
+    my $code = TPSGI::Router::resolve_callback( 'GET /hello', 'My::Routes::hello' );
 
 =cut
 
@@ -310,6 +393,20 @@ sub resolve_callback {
 What validate() checks of one operation beyond its schema: the names of its
 query parameters, whether an undeclared key in the query is a 400, and the
 media types of its request body.
+
+=over 4
+
+=item schema - Object - the JSON::Validator::Schema::OpenAPIv3 of the document
+
+=item method - Str - the method of the operation, in lower case
+
+=item template - Str - the template of the operation
+
+=back
+
+Returns HashRef, with C<query_names>, C<strict> and C<body_types>.
+
+    my $rules = $router->rules_for( $schema, 'get', '/hello' );
 
 =cut
 
@@ -338,6 +435,18 @@ no C<+>.
 When a template matches and none of the matching templates has an operation
 for $method, the HASH holds C<status>, which is 405, and C<allow>, the methods
 that they do have.  A HEAD request falls back to C<get>.
+
+=over 4
+
+=item method - Str - the method of the request, in any case
+
+=item path - Str - the path of the request
+
+=back
+
+Returns HashRef or undef: the route, the 405, or undef when nothing matches.
+
+    my $route = $router->match( 'GET', '/sitemap/1.xml' );
 
 =cut
 
@@ -384,6 +493,17 @@ an operation that declares a query parameter or a request body.
 
 The values of C<path>, C<query> and C<body> are coerced in place, so a parameter
 of type integer arrives as a number.
+
+=over 4
+
+=item route - HashRef - what match() returned
+
+=back
+
+Returns the status and the reasons, as a list, or an empty list for a valid
+request.
+
+    my ( $status, @errors ) = $router->validate( $route, query => \%query );
 
 =cut
 
@@ -452,6 +572,10 @@ sub validate {
 
 Each route as a HASH reference with C<template> and C<method>, in the order
 match() tries them, for a caller that lists them.
+
+Returns the routes, as a list of HASH references.
+
+    my @routes = $router->routes;
 
 =cut
 
