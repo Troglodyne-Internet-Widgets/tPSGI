@@ -57,19 +57,20 @@ Returns the options, as a list of pairs.
 sub get_config {
     $ENV{HOME} ||= Cwd::getcwd();
     my %options = (
-        verbose    => 0,
-        custom_log => undef,
-        routers    => [],
-        loggers    => [],
-        auth       => undef,
-        domain     => '',
-        user       => '',
-        binds      => [],
-        cgi_dirs   => [],
-        basedir    => '.',
-        http_user  => '',
-        tpsgi_dir  => Cwd::getcwd(),
-        autoreload => 0,
+        verbose        => 0,
+        custom_log     => undef,
+        routers        => [],
+        loggers        => [],
+        auth           => undef,
+        domain         => '',
+        user           => '',
+        binds          => [],
+        cgi_dirs       => [],
+        basedir        => '.',
+        http_user      => '',
+        tpsgi_dir      => Cwd::getcwd(),
+        autoreload     => 0,
+        compress_types => [],
     );
     my $config_file = "$ENV{HOME}/.tpsgi.ini";
     if ( -e $config_file ) {
