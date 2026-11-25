@@ -4,6 +4,7 @@
 use 5.040;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use Data::Dumper;
 use FindBin::libs;
@@ -86,8 +87,9 @@ sub stream_to_stdout {
 my $limit         = $ARGV[4] || 1;
 my $max_redirects = $ARGV[5] || 6;
 my $redirects     = 0;
+my $runs          = 0;
 
-for ( 1 .. $limit ) {
+while ( $runs++ < $limit ) {
   LOOP:
     my $out = $app->( \%env );
 
