@@ -449,6 +449,8 @@ A function.  Die, and name $what, when the rules_for() of $operation give one
 name to two of the path, the query and the body, or when its C<x-tpsgi-data>
 sets a name that one of them declares.
 
+    TPSGI::Router::check_names( "$name: GET $template", $operation, $rules );
+
 =cut
 
 sub check_names {
