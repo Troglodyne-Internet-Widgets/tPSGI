@@ -1292,7 +1292,7 @@ for a 400, and the reasons go to the log at the debug level.
 Returns HashRef or ArrayRef: the query, or the PSGI response of a request that
 fails validation.
 
-    my $query = $tpsgi->extract_query( $path, $route, $env );
+    my $input = $tpsgi->extract_input( $path, $route, $env );
 
 =cut
 
